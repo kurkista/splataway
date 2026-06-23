@@ -22,7 +22,7 @@ header "Setting up Python venv with PyTorch (MPS/Metal)"
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip --quiet
 # macOS ARM build of PyTorch includes the MPS (Metal Performance Shaders) backend
-.venv/bin/pip install torch torchvision --quiet
+.venv/bin/pip install torch torchvision tomli --quiet
 
 TORCH_CMAKE=$(.venv/bin/python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
 echo "LibTorch cmake path: $TORCH_CMAKE"

@@ -20,7 +20,10 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
+try:
+    import tomllib          # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # Python < 3.11
 from datetime import datetime
 from pathlib import Path
 
