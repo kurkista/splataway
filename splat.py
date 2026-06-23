@@ -30,8 +30,8 @@ CONFIG_FILE = SCRIPT_DIR / "config.toml"
 PROJECTS    = SCRIPT_DIR / "projects"
 OPENSPLAT   = SCRIPT_DIR / "OpenSplat" / "build" / "opensplat"
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mts", ".avi", ".mkv", ".m4v", ".dng"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".dng"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mts", ".avi", ".mkv", ".m4v"}
 
 STEPS = ["frames", "features", "matching", "mapping", "train"]
 

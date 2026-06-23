@@ -15,7 +15,7 @@ PYTHON="$ROOT/.venv/bin/python3"
 # Fall back to system python if venv isn't built yet (shouldn't happen post-install)
 [ -x "$PYTHON" ] || PYTHON="python3"
 
-VIDEO_EXTS_RE='^(mp4|mov|mts|avi|mkv|m4v|dng)$'
+VIDEO_EXTS_RE='^(mp4|mov|mts|avi|mkv|m4v)$'
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 mkdir -p "$LOGS"
