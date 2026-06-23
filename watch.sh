@@ -135,11 +135,14 @@ for item in "${items[@]}"; do
     project_log="$LOGS/${name}.log"
 
     # ── Run the pipeline ──────────────────────────────────────────────────────
+    osascript -e "display notification \"Starting: $name\" with title \"splataway\" subtitle \"Pipeline started\"" 2>/dev/null || true
+
     if "$PYTHON" "$ROOT/splat.py" "$item" \
         --name "$name" \
         --output "$out_dir/splat.ply" \
         2>&1 | tee "$project_log"; then
 
+        osascript -e "display notification \"Splat ready — output/$name/\" with title \"splataway\" subtitle \"✓ Complete\"" 2>/dev/null || true
         log "SUCCESS: output → $out_dir/splat.ply"
 
         # Copy the pipeline log into the output folder for reference
@@ -151,6 +154,7 @@ for item in "${items[@]}"; do
         log "Input archived → archive/$name/"
 
     else
+        osascript -e "display notification \"Check logs/$name.log\" with title \"splataway\" subtitle \"✗ Pipeline failed\"" 2>/dev/null || true
         log "FAILED: $name — see $project_log"
         # Move failed input out of inbox so it doesn't re-trigger on next drop
         mkdir -p "$ARCHIVE/failed/$name"
