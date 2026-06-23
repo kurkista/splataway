@@ -50,7 +50,7 @@ def step_header(n: int, total: int, label: str) -> None:
     print(f"\n{bar}\n  [{n}/{total}] {label}\n{bar}\n", flush=True)
 
 
-def run(cmd: list, log_path: Path, dry_run: bool = False) -> None:
+def run(cmd: list, log_path: Path, dry_run: bool = False, env: dict | None = None) -> None:
     cmd = [str(c) for c in cmd]
     print(f"$ {' '.join(cmd)}\n", flush=True)
     if dry_run:
@@ -59,6 +59,7 @@ def run(cmd: list, log_path: Path, dry_run: bool = False) -> None:
         log.write(f"\n[{datetime.now().isoformat()}] {' '.join(cmd)}\n")
         proc = subprocess.Popen(
             cmd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -153,11 +154,8 @@ def main() -> None:
     log_path  = proj / "run.log"
 
     if not args.dry_run:
-        for d in [frames, colmap, sparse]:
+        for d in [colmap, sparse]:
             d.mkdir(parents=True, exist_ok=True)
-        # OpenSplat expects an images/ dir inside the COLMAP project
-        if not images_ln.exists():
-            images_ln.symlink_to(frames.resolve())
 
     # ── Summary ──────────────────────────────────────────────────────────────
     print(f"\n{'━' * 60}")
@@ -174,49 +172,61 @@ def main() -> None:
     total = len(STEPS)
 
     # ── Step 1: Frame extraction ──────────────────────────────────────────────
+    # colmap_images is the real directory COLMAP and OpenSplat read from.
+    # For JPEG folders we pass input_path directly (no symlink indirection that
+    # can confuse COLMAP's relative-path bookkeeping).
+    # For video / converted images it is the frames/ dir we write to.
+    if is_video:
+        colmap_images = frames
+    elif is_images:
+        source_images = sorted(
+            f for f in input_path.iterdir()
+            if f.suffix.lower() in IMAGE_EXTENSIONS
+        )
+        already_jpeg = all(f.suffix.lower() in {".jpg", ".jpeg"} for f in source_images)
+        if already_jpeg:
+            colmap_images = input_path.resolve()
+        else:
+            colmap_images = frames
+            if not args.dry_run:
+                frames.mkdir(parents=True, exist_ok=True)
+
+    if not args.dry_run:
+        # OpenSplat expects colmap/images/ to exist — symlink it to the real image dir
+        images_ln = colmap / "images"
+        if images_ln.is_symlink():
+            images_ln.unlink()
+        if not images_ln.exists():
+            images_ln.symlink_to(colmap_images)
+
     if STEPS.index("frames") >= skip_before:
         step_header(1, total, "Frame extraction")
         if is_video:
+            if not args.dry_run:
+                frames.mkdir(parents=True, exist_ok=True)
             run([
                 "ffmpeg", "-i", input_path,
                 "-qscale:v", quality,
                 "-vf", f"fps={fps}",
                 frames / "%04d.jpg",
             ], log_path, args.dry_run)
+        elif already_jpeg:
+            print(f"All JPEGs in input folder ({len(source_images)} images) — used directly, no copy.")
         else:
-            source_images = sorted(
-                f for f in input_path.iterdir()
-                if f.suffix.lower() in IMAGE_EXTENSIONS
-            )
-            already_jpeg = all(f.suffix.lower() in {".jpg", ".jpeg"} for f in source_images)
-
-            if already_jpeg:
-                # Zero disk cost: symlink frames/ directly to the input folder
-                print(f"All JPEGs — symlinking frames/ to input ({len(source_images)} images).")
-                if not args.dry_run:
-                    if frames.is_symlink() or frames.exists():
-                        if frames.is_symlink():
-                            frames.unlink()
-                        else:
-                            shutil.rmtree(frames)
-                    frames.symlink_to(input_path.resolve())
-            else:
-                # Convert PNG/TIFF/DNG → JPEG (3–5× smaller; COLMAP needs no lossless data)
-                print(f"Converting {len(source_images)} images to JPEG (saves ~70% disk vs PNG)...")
-                if not args.dry_run:
-                    frames.mkdir(parents=True, exist_ok=True)
-                for i, img in enumerate(source_images, 1):
-                    out = frames / f"{i:04d}.jpg"
-                    if args.dry_run:
-                        print(f"  ffmpeg -i {img.name} → {out.name}")
-                    elif not out.exists():
-                        subprocess.run(
-                            ["ffmpeg", "-i", str(img), "-qscale:v", str(quality),
-                             "-loglevel", "error", str(out)],
-                            check=True,
-                        )
-                if not args.dry_run:
-                    print(f"Converted {len(source_images)} images.")
+            # Convert PNG/TIFF/DNG → JPEG (3–5× smaller; COLMAP needs no lossless data)
+            print(f"Converting {len(source_images)} images to JPEG (saves ~70% disk vs PNG)...")
+            for i, img in enumerate(source_images, 1):
+                out = frames / f"{i:04d}.jpg"
+                if args.dry_run:
+                    print(f"  ffmpeg -i {img.name} → {out.name}")
+                elif not out.exists():
+                    subprocess.run(
+                        ["ffmpeg", "-i", str(img), "-qscale:v", str(quality),
+                         "-loglevel", "error", str(out)],
+                        check=True,
+                    )
+            if not args.dry_run:
+                print(f"Converted {len(source_images)} images.")
     else:
         print(f"\n  Skipping: frames")
 
@@ -226,7 +236,7 @@ def main() -> None:
         run([
             "colmap", "feature_extractor",
             "--database_path", db,
-            "--image_path",    frames,
+            "--image_path",    colmap_images,
             "--ImageReader.single_camera", single_camera,
         ], log_path, args.dry_run)
     else:
@@ -248,7 +258,7 @@ def main() -> None:
         run([
             "colmap", "mapper",
             "--database_path", db,
-            "--image_path",    frames,
+            "--image_path",    colmap_images,
             "--output_path",   sparse,
         ], log_path, args.dry_run)
 
@@ -268,11 +278,14 @@ def main() -> None:
     # ── Step 5: OpenSplat training ────────────────────────────────────────────
     if STEPS.index("train") >= skip_before:
         step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, Metal GPU)")
+        # KMP_DUPLICATE_LIB_OK: PyTorch and OpenSplat each bundle libomp; this
+        # suppresses the fatal duplicate-runtime abort on macOS.
+        splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE"}
         run([
             OPENSPLAT, colmap,
             "-n", iters,
             "-o", out_ply,
-        ], log_path, args.dry_run)
+        ], log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:
             print(f"\n{'━' * 60}")
