@@ -55,6 +55,32 @@ slugify() {
     echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | tr -cd '[:alnum:]_-'
 }
 
+# ── Auto-group loose image files ──────────────────────────────────────────────
+# If images are dropped directly into inbox/ (not wrapped in a folder), gather
+# them into a subfolder so the pipeline treats them as a single project.
+IMAGE_EXTS_RE='^(jpg|jpeg|png|tif|tiff|webp|dng)$'
+loose_images=()
+while IFS= read -r -d '' f; do
+    ext="${f##*.}"
+    if echo "$ext" | grep -qiE "$IMAGE_EXTS_RE"; then
+        loose_images+=("$f")
+    fi
+done < <(find "$INBOX" -maxdepth 1 -type f -print0 2>/dev/null | sort -z)
+
+if [ ${#loose_images[@]} -gt 0 ]; then
+    # Derive folder name from first filename: strip trailing _NNNN and date sequences
+    first_stem="$(basename "${loose_images[0]}" | sed 's/\.[^.]*$//')"
+    folder_name="$(echo "$first_stem" | sed -E 's/[_-]*[0-9]+([_-][0-9]+)*$//')"
+    [ -z "$folder_name" ] && folder_name="images"
+    folder_name="$(slugify "$folder_name")_$(date +%Y%m%d)"
+    dest="$INBOX/$folder_name"
+    mkdir -p "$dest"
+    log "Auto-grouping ${#loose_images[@]} loose image files → inbox/$folder_name/"
+    for f in "${loose_images[@]}"; do
+        mv "$f" "$dest/"
+    done
+fi
+
 # ── Scan inbox ────────────────────────────────────────────────────────────────
 shopt -s nullglob
 items=("$INBOX"/*)
