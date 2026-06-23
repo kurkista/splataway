@@ -1,0 +1,2 @@
+# splataway
+Gaussian Splat project
