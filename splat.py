@@ -67,7 +67,9 @@ def run(cmd: list, log_path: Path, dry_run: bool = False, env: dict | None = Non
         assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
+            sys.stdout.flush()
             log.write(line)
+            log.flush()
         proc.wait()
     if proc.returncode != 0:
         print(f"\nERROR: command exited with code {proc.returncode}", flush=True)
