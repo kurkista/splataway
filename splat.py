@@ -278,9 +278,10 @@ def main() -> None:
     # ── Step 5: OpenSplat training ────────────────────────────────────────────
     if STEPS.index("train") >= skip_before:
         step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, Metal GPU)")
-        # KMP_DUPLICATE_LIB_OK: PyTorch and OpenSplat each bundle libomp; this
-        # suppresses the fatal duplicate-runtime abort on macOS.
-        splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE"}
+        # PyTorch and OpenSplat each bundle libomp; on macOS the two runtimes
+        # collide on thread creation and crash. KMP_DUPLICATE_LIB_OK suppresses
+        # the abort; OMP_NUM_THREADS=1 prevents the thread-creation race entirely.
+        splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
         run([
             OPENSPLAT, colmap,
             "-n", iters,
