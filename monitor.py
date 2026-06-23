@@ -108,6 +108,7 @@ def parse_log(log_path: Path) -> dict:
 
     lines = text.splitlines()
     step_start: dict[str, datetime] = {}
+    step_latest_start: dict[str, datetime] = {}   # most recent restart of each step
     ordered_seen: list[str] = []
     features_progress: Optional[tuple[int, int]] = None
     train_progress:    Optional[tuple[int, int]] = None
@@ -132,6 +133,13 @@ def parse_log(log_path: Path) -> dict:
                     if step not in step_start:
                         step_start[step] = ts
                         ordered_seen.append(step)
+                    # Always track the most recent invocation (handles restarts)
+                    step_latest_start[step] = ts
+                    # Reset progress counters on restart
+                    if step == "train":
+                        train_progress = None
+                    elif step == "features":
+                        features_progress = None
                     active_step = step
                     last_cmd_line_idx = idx
                     break
@@ -194,6 +202,7 @@ def parse_log(log_path: Path) -> dict:
 
     return {
         "step_start":        step_start,
+        "step_latest_start": step_latest_start,   # for ETA on restarted steps
         "step_end":          step_end,
         "steps_done":        steps_done,
         "current_step":      current_step,
@@ -238,10 +247,11 @@ def eta_str(start: Optional[datetime], current: int, total: int) -> str:
 
 def build_panel(project: str, state: dict) -> Panel:
     now = datetime.now()
-    step_start  = state.get("step_start", {})
-    step_end    = state.get("step_end", {})
-    steps_done  = state.get("steps_done", [])
-    current     = state.get("current_step")
+    step_start        = state.get("step_start", {})
+    step_latest_start = state.get("step_latest_start", {})
+    step_end          = state.get("step_end", {})
+    steps_done        = state.get("steps_done", [])
+    current           = state.get("current_step")
 
     # ── Overall status ────────────────────────────────────────────────────────
     first_start = step_start.get(STEPS[0]) or (
@@ -298,7 +308,9 @@ def build_panel(project: str, state: dict) -> Panel:
                 if prog:
                     cur, tot = prog
                     bar = progress_bar(cur, tot)
-                    eta = eta_str(start, cur, tot)
+                    # Use most recent restart time so ETA reflects current run
+                    train_start = step_latest_start.get("train") or start
+                    eta = eta_str(train_start, cur, tot)
                     detail = Text(f"{bar}  {cur}/{tot}  {eta}", style="cyan")
                 else:
                     detail = Text("initialising…", style="yellow")

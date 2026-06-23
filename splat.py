@@ -275,31 +275,15 @@ def main() -> None:
     else:
         print(f"\n  Skipping: mapping")
 
-    # ── Step 5: OpenSplat training ────────────────────────────────────────────
+    # ── Step 5: Nerfstudio Gaussian Splat training ──────────────────────────
     if STEPS.index("train") >= skip_before:
-        # Detect whether the OpenSplat binary has working Metal GPU support by
-        # checking for the compiled Metal library. Full Xcode (not just CLT) is
-        # required for Metal shader compilation; without it we fall back to CPU.
-        metal_lib = SCRIPT_DIR / "OpenSplat" / "build" / "default.metallib"
-        use_gpu = metal_lib.exists()
-
-        if use_gpu:
-            step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, Metal GPU)")
-            # On GPU runs: PyTorch and OpenSplat each bundle libomp; the two runtimes
-            # collide on thread creation. KMP_DUPLICATE_LIB_OK suppresses the abort;
-            # OMP_NUM_THREADS=1 prevents the thread-creation race entirely.
-            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
-        else:
-            step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, CPU)")
-            print("  (Metal GPU not available — running on CPU.)")
-            print("  To enable: install Xcode from the App Store, then re-run: bash install.sh")
-            # CPU-only: no OMP thread collision, use all available cores.
-            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE"}
-
-        splat_cmd = [OPENSPLAT, colmap, "-n", iters, "-o", out_ply]
-        if not use_gpu:
-            splat_cmd.append("--cpu")
-        run(splat_cmd, log_path, args.dry_run, env=splat_env)
+        step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, CPU)")
+        print("  (Running on CPU — Metal toolchain not available on macOS 26 / Xcode 26.5)")
+        # OMP_NUM_THREADS=1 is required even in CPU mode: both PyTorch and OpenSplat
+        # bundle libomp, and without this the mutex initialisation races and crashes.
+        splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
+        run([OPENSPLAT, colmap, "-n", iters, "-o", out_ply, "--cpu"],
+            log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:
             print(f"\n{'━' * 60}")
