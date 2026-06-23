@@ -104,7 +104,7 @@ echo "Launchd watcher registered: $PLIST_LABEL"
 # ── 7. Smoke test ─────────────────────────────────────────────────────────────
 header "Verifying tools"
 echo -n "  ffmpeg    : "; ffmpeg -version 2>&1 | head -1
-echo -n "  colmap    : "; colmap --version 2>&1 | head -1
+echo -n "  colmap    : "; colmap help 2>&1 | head -1
 echo -n "  opensplat : "
 if ./OpenSplat/build/opensplat --help 2>&1 | grep -iqE 'usage|opensplat|options'; then
     echo "OK"
