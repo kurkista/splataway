@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# watch.sh — triggered by launchd WatchPaths whenever inbox/ changes.
+# Processes all pending items: video files and image folders.
+# Input is archived on success; moved to archive/failed/ on error.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+INBOX="$ROOT/inbox"
+ARCHIVE="$ROOT/archive"
+OUTPUT="$ROOT/output"
+LOGS="$ROOT/logs"
+LOCK="$ROOT/.watch.lock"
+PYTHON="$ROOT/.venv/bin/python3"
+
+# Fall back to system python if venv isn't built yet (shouldn't happen post-install)
+[ -x "$PYTHON" ] || PYTHON="python3"
+
+VIDEO_EXTS_RE='^(mp4|mov|mts|avi|mkv|m4v|dng)$'
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+mkdir -p "$LOGS"
+WATCHER_LOG="$LOGS/watcher.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$WATCHER_LOG"
+}
+
+# ── Lock — prevent overlapping runs ──────────────────────────────────────────
+if [ -f "$LOCK" ]; then
+    log "Already running (lock exists). Exiting."
+    exit 0
+fi
+touch "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
+
+# ── Wait for a file or folder to finish copying (size stability check) ────────
+wait_stable() {
+    local path="$1"
+    local prev=-1
+    local curr
+    log "Waiting for copy of $(basename "$path") to stabilise..."
+    while true; do
+        curr=$(du -sk "$path" 2>/dev/null | cut -f1 || echo 0)
+        if [ "$curr" -eq "$prev" ] && [ "$curr" -gt 0 ]; then
+            break
+        fi
+        prev=$curr
+        sleep 3
+    done
+    log "Copy stable (${curr}KB)."
+}
+
+# ── Convert filename stem to safe slug ────────────────────────────────────────
+slugify() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | tr -cd '[:alnum:]_-'
+}
+
+# ── Scan inbox ────────────────────────────────────────────────────────────────
+shopt -s nullglob
+items=("$INBOX"/*)
+
+if [ ${#items[@]} -eq 0 ]; then
+    log "Inbox is empty — nothing to do."
+    exit 0
+fi
+
+log "Found ${#items[@]} item(s) in inbox."
+
+for item in "${items[@]}"; do
+    stem="$(basename "$item")"
+    stem_noext="${stem%.*}"
+    name="$(slugify "$stem_noext")"
+    [ -z "$name" ] && name="scene_$(date +%s)"
+
+    # ── Classify input ────────────────────────────────────────────────────────
+    if [ -f "$item" ]; then
+        ext="${stem##*.}"
+        if ! echo "$ext" | grep -qiE "$VIDEO_EXTS_RE"; then
+            log "SKIP: $stem (not a recognised video format)"
+            continue
+        fi
+        input_type="video"
+    elif [ -d "$item" ]; then
+        input_type="images"
+    else
+        log "SKIP: $stem (not a file or directory)"
+        continue
+    fi
+
+    log "──────────────────────────────────────────────"
+    log "Processing: $stem  →  project: $name  (${input_type})"
+
+    wait_stable "$item"
+
+    # ── Ensure unique output dir ──────────────────────────────────────────────
+    out_dir="$OUTPUT/$name"
+    # If a previous successful run exists, suffix with timestamp
+    if [ -d "$out_dir" ] && [ -f "$out_dir/splat.ply" ]; then
+        out_dir="${out_dir}_$(date +%Y%m%d_%H%M%S)"
+        name="$(basename "$out_dir")"
+        log "Previous output found — using: $out_dir"
+    fi
+    mkdir -p "$out_dir"
+
+    project_log="$LOGS/${name}.log"
+
+    # ── Run the pipeline ──────────────────────────────────────────────────────
+    if "$PYTHON" "$ROOT/splat.py" "$item" \
+        --name "$name" \
+        --output "$out_dir/splat.ply" \
+        2>&1 | tee "$project_log"; then
+
+        log "SUCCESS: output → $out_dir/splat.ply"
+
+        # Copy the pipeline log into the output folder for reference
+        cp "$project_log" "$out_dir/run.log" 2>/dev/null || true
+
+        # Archive the input
+        mkdir -p "$ARCHIVE/$name"
+        mv "$item" "$ARCHIVE/$name/"
+        log "Input archived → archive/$name/"
+
+    else
+        log "FAILED: $name — see $project_log"
+        # Move failed input out of inbox so it doesn't re-trigger on next drop
+        mkdir -p "$ARCHIVE/failed/$name"
+        mv "$item" "$ARCHIVE/failed/$name/"
+        log "Failed input moved → archive/failed/$name/"
+    fi
+done
+
+log "Batch complete."

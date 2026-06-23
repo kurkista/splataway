@@ -1,0 +1,16 @@
+# Gaussian Splat pipeline configuration
+# Edit these defaults; override any value per-run with CLI flags.
+
+[ffmpeg]
+fps     = 2      # frames/sec extracted from video; 1 for slow drone, 3 for fast handheld
+quality = 1      # JPEG qscale (1 = best quality / largest file)
+
+[colmap]
+# 'sequential' — ordered frames from a single video pass (much faster, preferred for drone)
+# 'exhaustive' — unordered photo sets (cemetery walk-around, hand-held survey)
+matcher       = "sequential"
+single_camera = true   # true if all images share one lens (drone, single camera); false for mixed sets
+
+[opensplat]
+iterations  = 7000      # 3000 quick preview, 7000 standard, 30000 maximum quality
+output_name = "splat.ply"

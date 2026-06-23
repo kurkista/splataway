@@ -1,0 +1,13 @@
+# Build artifacts and dependencies
+.venv/
+OpenSplat/
+libtorch/
+
+# Project working directories (large binary data)
+projects/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
