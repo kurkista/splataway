@@ -181,14 +181,39 @@ def main() -> None:
                 frames / "%04d.jpg",
             ], log_path, args.dry_run)
         else:
-            print("Input is an image folder — copying images to frames/")
-            if not args.dry_run:
-                count = 0
-                for img in sorted(input_path.iterdir()):
-                    if img.suffix.lower() in IMAGE_EXTENSIONS:
-                        shutil.copy2(img, frames / img.name)
-                        count += 1
-                print(f"Copied {count} images.")
+            source_images = sorted(
+                f for f in input_path.iterdir()
+                if f.suffix.lower() in IMAGE_EXTENSIONS
+            )
+            already_jpeg = all(f.suffix.lower() in {".jpg", ".jpeg"} for f in source_images)
+
+            if already_jpeg:
+                # Zero disk cost: symlink frames/ directly to the input folder
+                print(f"All JPEGs — symlinking frames/ to input ({len(source_images)} images).")
+                if not args.dry_run:
+                    if frames.is_symlink() or frames.exists():
+                        if frames.is_symlink():
+                            frames.unlink()
+                        else:
+                            shutil.rmtree(frames)
+                    frames.symlink_to(input_path.resolve())
+            else:
+                # Convert PNG/TIFF/DNG → JPEG (3–5× smaller; COLMAP needs no lossless data)
+                print(f"Converting {len(source_images)} images to JPEG (saves ~70% disk vs PNG)...")
+                if not args.dry_run:
+                    frames.mkdir(parents=True, exist_ok=True)
+                for i, img in enumerate(source_images, 1):
+                    out = frames / f"{i:04d}.jpg"
+                    if args.dry_run:
+                        print(f"  ffmpeg -i {img.name} → {out.name}")
+                    elif not out.exists():
+                        subprocess.run(
+                            ["ffmpeg", "-i", str(img), "-qscale:v", str(quality),
+                             "-loglevel", "error", str(out)],
+                            check=True,
+                        )
+                if not args.dry_run:
+                    print(f"Converted {len(source_images)} images.")
     else:
         print(f"\n  Skipping: frames")
 
