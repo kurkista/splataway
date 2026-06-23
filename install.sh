@@ -37,12 +37,25 @@ else
 fi
 
 header "Building OpenSplat (takes a few minutes)"
+
+# Metal GPU requires the full Xcode app (not just Command Line Tools).
+# Without it, we build CPU-only and add --cpu automatically at runtime.
+if xcrun --find metal &>/dev/null; then
+    GPU_FLAG="-DGPU_RUNTIME=MPS"
+    echo "  Metal compiler found — building with GPU (MPS) support."
+else
+    GPU_FLAG=""
+    echo "  ⚠  Metal compiler not found. Building CPU-only."
+    echo "     Install Xcode from the App Store, then re-run install.sh for GPU support."
+fi
+
 mkdir -p OpenSplat/build
 cmake \
     -S OpenSplat \
     -B OpenSplat/build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+    $GPU_FLAG \
     -DOPENSPLAT_BUILD_SIMPLE_TRAINER=ON
 cmake --build OpenSplat/build --parallel "$(sysctl -n hw.logicalcpu)"
 

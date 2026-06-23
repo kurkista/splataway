@@ -30,9 +30,25 @@ except ImportError:
     sys.exit(1)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path(__file__).parent
-PROJECTS   = SCRIPT_DIR / "projects"
-LOGS_DIR   = SCRIPT_DIR / "logs"
+SCRIPT_DIR  = Path(__file__).parent
+PROJECTS    = SCRIPT_DIR / "projects"
+LOGS_DIR    = SCRIPT_DIR / "logs"
+CONFIG_FILE = SCRIPT_DIR / "config.toml"
+
+
+def _load_iters() -> int:
+    try:
+        import tomllib  # type: ignore
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore
+        except ImportError:
+            return 7000
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            return int(tomllib.load(f)["opensplat"]["iterations"])
+    except Exception:
+        return 7000
 
 # ── Pipeline metadata ─────────────────────────────────────────────────────────
 STEPS = ["frames", "features", "matching", "mapping", "train"]
@@ -75,8 +91,12 @@ def project_log_path(name: str) -> Optional[Path]:
 _CMD_TS_RE  = re.compile(r'^\[(\d{4}-\d{2}-\d{2}T[\d:.]+)\] (.+)')
 _FEAT_RE    = re.compile(r'Processed file \[(\d+)/(\d+)\]')
 _MAP_REG_RE = re.compile(r'num_reg_frames=(\d+)')
-# OpenSplat iteration formats: "[100/7000]" or "Step 100/7000" or "Iter 100/7000"
-_TRAIN_RE   = re.compile(r'(?:\[(\d+)/(\d+)\]|[Ss]tep[:\s]+(\d+)[/\s]+(\d+)|[Ii]ter[:\s]+(\d+)[/\s]+(\d+))')
+# OpenSplat iteration formats (in priority order):
+#   "Step 100/7000"  or  "Iter 100/7000"  (explicit total)
+#   "Step 100: 0.123 (45%)"               (percentage, no total — common OpenSplat CPU output)
+#   "[100/7000]"                           (bracket form)
+_TRAIN_RE      = re.compile(r'(?:[Ss]tep[:\s]+(\d+)[/\s]+(\d+)|[Ii]ter[:\s]+(\d+)[/\s]+(\d+)|\[(\d+)/(\d+)\])')
+_TRAIN_PCT_RE  = re.compile(r'^Step (\d+):\s+[\d.]+\s+\((\d+)%\)')
 _COLMAP_PREFIX = re.compile(r'^[IWE]\d{8}\s+\S+\s+\S+\]\s*')
 
 
@@ -129,6 +149,7 @@ def parse_log(log_path: Path) -> dict:
                 mapping_count = int(mm.group(1))
 
         if active_step == "train":
+            # Prefer explicit-total formats first
             mt = _TRAIN_RE.search(line)
             if mt:
                 g = mt.groups()
@@ -137,6 +158,13 @@ def parse_log(log_path: Path) -> dict:
                     if a is not None and b is not None:
                         train_progress = (int(a), int(b))
                         break
+            else:
+                # "Step N: loss (P%)" — derive absolute step from config total
+                mp = _TRAIN_PCT_RE.match(line)
+                if mp:
+                    step_n = int(mp.group(1))
+                    total_iters = _load_iters()
+                    train_progress = (step_n, total_iters)
 
         # ── Completion signals ───────────────────────────────────────────────
         if "Done." in line and "Output" in line:
