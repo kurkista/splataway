@@ -228,7 +228,6 @@ def main() -> None:
             "--database_path", db,
             "--image_path",    frames,
             "--ImageReader.single_camera", single_camera,
-            "--SiftExtraction.use_gpu",    1,
         ], log_path, args.dry_run)
     else:
         print(f"\n  Skipping: features")

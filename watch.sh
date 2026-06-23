@@ -5,6 +5,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+# Ensure Homebrew tools (ffmpeg, colmap) are on PATH in non-interactive shells
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+
 INBOX="$ROOT/inbox"
 ARCHIVE="$ROOT/archive"
 OUTPUT="$ROOT/output"
