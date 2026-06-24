@@ -117,8 +117,10 @@ def main() -> None:
     quality = cfg["ffmpeg"]["quality"]
     single_camera = 1 if cfg["colmap"]["single_camera"] else 0
     out_name      = cfg["opensplat"]["output_name"]
-    sh_degree     = cfg["opensplat"].get("sh_degree", 1)
-    skip_before   = STEPS.index(args.from_step) if args.from_step else 0
+    sh_degree         = cfg["opensplat"].get("sh_degree", 1)
+    num_downscales    = cfg["opensplat"].get("num_downscales", 2)
+    reset_alpha_every = cfg["opensplat"].get("reset_alpha_every", 30)
+    skip_before       = STEPS.index(args.from_step) if args.from_step else 0
 
     # ── Input validation ─────────────────────────────────────────────────────
     input_path = Path(args.input).resolve()
@@ -286,7 +288,9 @@ def main() -> None:
         # bundle libomp, and without this the mutex initialisation races and crashes.
         splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
         run([OPENSPLAT, colmap, "-n", iters, "-o", out_ply, "--cpu",
-             "--sh-degree", sh_degree],
+             "--sh-degree", sh_degree,
+             "--num-downscales", num_downscales,
+             "--reset-alpha-every", reset_alpha_every],
             log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:

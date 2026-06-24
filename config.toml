@@ -17,3 +17,9 @@ output_name = "splat.ply"
 # SH degree 3 = full colour (default) but causes NaN on CPU at high iteration counts.
 # Degree 1 is stable on CPU and still produces good colour; raise to 3 once Metal works.
 sh_degree   = 1
+# CPU NaN prevention: two scheduled events at ~step 3000 combine to cause divergence:
+#   1. Opacity reset (reset_alpha_every=30 × refine_every=100 → fires at step 3400)
+#   2. Resolution schedule jump (num_downscales=2 → doubles at step 3000)
+# Setting both past our iteration count keeps training numerically stable.
+num_downscales    = 0    # train at full resolution from start (no mid-run jump)
+reset_alpha_every = 300  # 300×100=30000 steps — effectively disabled for ≤30k runs

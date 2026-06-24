@@ -254,13 +254,22 @@ def build_panel(project: str, state: dict) -> Panel:
     current           = state.get("current_step")
 
     # ── Overall status ────────────────────────────────────────────────────────
-    # Use the most recent invocation of each step (step_latest_start) so that
-    # a resumed run (--from-step train) shows elapsed time from *this* run,
-    # not from the first-ever command in the log hours/days earlier.
-    run_start = (
-        min(step_latest_start.values()) if step_latest_start
-        else (min(step_start.values()) if step_start else None)
-    )
+    # Determine run_start for the header clock.
+    # If there's a large gap between the earliest and latest step starts (e.g.
+    # pipeline resumed overnight), the min would show yesterday's timestamp.
+    # Instead: if max − min > 3 h, treat the latest step start as the run start
+    # (this invocation). For a fresh end-to-end run the gap is small so min
+    # gives the correct total elapsed.
+    if step_latest_start:
+        ts_vals  = list(step_latest_start.values())
+        ts_min   = min(ts_vals)
+        ts_max   = max(ts_vals)
+        gap_h    = (ts_max - ts_min).total_seconds() / 3600
+        run_start = ts_max if gap_h > 3 else ts_min
+    elif step_start:
+        run_start = min(step_start.values())
+    else:
+        run_start = None
     total_elapsed = fmt_elapsed(run_start)
 
     if state.get("done"):
