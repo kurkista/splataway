@@ -276,8 +276,8 @@ def build_panel(project: str, state: dict) -> Panel:
         status_text = Text("  ✓  Complete", style="bold green")
         border_style = "green"
     elif state.get("failed"):
-        status_text = Text("  ✗  Failed", style="bold red")
-        border_style = "red"
+        status_text = Text("  ✗  Stopped", style="bold white")
+        border_style = "white"
     elif current:
         status_text = Text("  ⟳  Running", style="bold yellow")
         border_style = "yellow"
@@ -338,10 +338,11 @@ def build_panel(project: str, state: dict) -> Panel:
             else:
                 detail = Text("running…", style="yellow")
 
-        elif state.get("failed") and step not in steps_done:
-            icon    = Text("✗", style="bold red")
+        elif state.get("failed") and start is not None and step not in steps_done:
+            # Step was attempted but didn't complete
+            icon    = Text("✗", style="bold white")
             elapsed = Text("")
-            detail  = Text("—", style="dim red")
+            detail  = Text("—", style="dim")
 
         else:
             icon    = Text("○", style="dim")
