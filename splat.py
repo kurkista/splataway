@@ -117,6 +117,7 @@ def main() -> None:
     quality = cfg["ffmpeg"]["quality"]
     single_camera = 1 if cfg["colmap"]["single_camera"] else 0
     out_name      = cfg["opensplat"]["output_name"]
+    sh_degree     = cfg["opensplat"].get("sh_degree", 1)
     skip_before   = STEPS.index(args.from_step) if args.from_step else 0
 
     # ── Input validation ─────────────────────────────────────────────────────
@@ -284,7 +285,8 @@ def main() -> None:
         # OMP_NUM_THREADS=1 is required even in CPU mode: both PyTorch and OpenSplat
         # bundle libomp, and without this the mutex initialisation races and crashes.
         splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
-        run([OPENSPLAT, colmap, "-n", iters, "-o", out_ply, "--cpu"],
+        run([OPENSPLAT, colmap, "-n", iters, "-o", out_ply, "--cpu",
+             "--sh-degree", sh_degree],
             log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:

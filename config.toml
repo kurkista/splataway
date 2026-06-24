@@ -14,3 +14,6 @@ single_camera = true   # true if all images share one lens (drone, single camera
 [opensplat]
 iterations  = 7000      # 3000 quick preview, 7000 standard, 30000 maximum quality
 output_name = "splat.ply"
+# SH degree 3 = full colour (default) but causes NaN on CPU at high iteration counts.
+# Degree 1 is stable on CPU and still produces good colour; raise to 3 once Metal works.
+sh_degree   = 1
