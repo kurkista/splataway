@@ -254,10 +254,14 @@ def build_panel(project: str, state: dict) -> Panel:
     current           = state.get("current_step")
 
     # ── Overall status ────────────────────────────────────────────────────────
-    first_start = step_start.get(STEPS[0]) or (
-        min(step_start.values()) if step_start else None
+    # Use the most recent invocation of each step (step_latest_start) so that
+    # a resumed run (--from-step train) shows elapsed time from *this* run,
+    # not from the first-ever command in the log hours/days earlier.
+    run_start = (
+        min(step_latest_start.values()) if step_latest_start
+        else (min(step_start.values()) if step_start else None)
     )
-    total_elapsed = fmt_elapsed(first_start)
+    total_elapsed = fmt_elapsed(run_start)
 
     if state.get("done"):
         status_text = Text("  ✓  Complete", style="bold green")
