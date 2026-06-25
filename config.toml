@@ -23,3 +23,10 @@ sh_degree   = 1
 # Setting both past our iteration count keeps training numerically stable.
 num_downscales    = 2    # progressive resolution: starts 1/4 res, doubles at step 3000 & 6000
 reset_alpha_every = 300  # 300×100=30000 steps — effectively disabled for ≤30k runs
+
+[cloud]
+# GPU cloud training — activated with: python3 splat.py <input> --cloud runpod
+# Requires: export RUNPOD_API_KEY=your_key_here  (get at runpod.io/console/user/settings)
+iterations = 30000                           # 30k is practical with GPU (~20 min)
+gpu        = "NVIDIA GeForce RTX 4090"       # ~$0.50/hr on RunPod
+image      = "kurkista/opensplat-cuda:latest" # pre-built Docker image with CUDA + OpenSplat

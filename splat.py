@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 splat.py — Gaussian Splat automation pipeline
-Video or image folder → COLMAP SfM → OpenSplat (Metal) → .ply
+Video or image folder → COLMAP SfM → OpenSplat → .ply
 
 Usage:
   python3 splat.py <input> [options]
@@ -11,6 +11,7 @@ Examples:
   python3 splat.py inbox/building/ --matcher exhaustive --iters 30000
   python3 splat.py footage/fly.mov  --name castle --fps 1
   python3 splat.py footage/fly.mov  --name castle --from-step matching
+  python3 splat.py inbox/scene/     --cloud runpod
 """
 
 from __future__ import annotations
@@ -83,6 +84,72 @@ def guard_tool(name: str, hint: str = "") -> None:
         sys.exit(1)
 
 
+# ── Cloud training ─────────────────────────────────────────────────────────────
+def _cloud_train(
+    colmap_dir: Path,
+    images_dir: Path,
+    out_ply: Path,
+    iters: int,
+    gpu: str,
+    image: str,
+    log_path: Path,
+    dry_run: bool,
+) -> None:
+    from cloud.pack       import pack_scene
+    from cloud.runpod_api import create_pod, wait_ready, run_remote, terminate_pod
+    from cloud.transfer   import upload, download
+
+    if dry_run:
+        print(f"  [dry-run] Would pack scene and train on RunPod ({gpu})")
+        print(f"  [dry-run] Remote: opensplat /workspace/scene/colmap -n {iters} --sh-degree 3")
+        return
+
+    tmp_dir = SCRIPT_DIR / "projects" / out_ply.parent.name / "cloud_tmp"
+    pod_id = None
+    try:
+        # Pack
+        tar_path = pack_scene(colmap_dir, images_dir, tmp_dir)
+
+        # Spin up pod
+        pod = create_pod(gpu=gpu, image=image, name=f"opensplat-{out_ply.parent.name}")
+        pod_id = pod["id"]
+        pod = wait_ready(pod_id)
+
+        # Upload
+        print("  Uploading scene…")
+        remote_tar = upload(pod, tar_path)
+
+        # Extract on pod
+        print("  Extracting…")
+        run_remote(pod, f"tar -xzf {remote_tar} -C /workspace/")
+
+        # Train
+        remote_cmd = (
+            f"$OPENSPLAT /workspace/scene/colmap"
+            f" -n {iters}"
+            f" -o /workspace/splat.ply"
+            f" --sh-degree 3"
+        )
+        print(f"  Training: {remote_cmd}\n")
+        with open(log_path, "a") as log:
+            log.write(f"\n[{datetime.now().isoformat()}] [runpod:{pod_id}] {remote_cmd}\n")
+            rc = run_remote(pod, remote_cmd, log_file=log)
+        if rc != 0:
+            print(f"\nERROR: remote opensplat exited with code {rc}")
+            sys.exit(rc)
+
+        # Download
+        print("  Downloading splat.ply…")
+        download(pod, "/workspace/splat.ply", out_ply)
+
+    finally:
+        if pod_id:
+            terminate_pod(pod_id)
+        # Clean up local tar
+        if "tar_path" in dir() and tar_path.exists():  # type: ignore[possibly-undefined]
+            tar_path.unlink()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -106,13 +173,18 @@ def main() -> None:
         metavar="STEP",
         help=f"Resume from a specific step: {', '.join(STEPS)}",
     )
+    parser.add_argument(
+        "--cloud",
+        choices=["runpod"],
+        metavar="PROVIDER",
+        help="Train on cloud GPU instead of local CPU (requires RUNPOD_API_KEY env var)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running")
     args = parser.parse_args()
 
     # ── Config + arg merging ─────────────────────────────────────────────────
     cfg     = load_config()
     fps     = args.fps     or cfg["ffmpeg"]["fps"]
-    iters   = args.iters   or cfg["opensplat"]["iterations"]
     matcher = args.matcher or cfg["colmap"]["matcher"]
     quality = cfg["ffmpeg"]["quality"]
     single_camera = 1 if cfg["colmap"]["single_camera"] else 0
@@ -121,6 +193,13 @@ def main() -> None:
     num_downscales    = cfg["opensplat"].get("num_downscales", 2)
     reset_alpha_every = cfg["opensplat"].get("reset_alpha_every", 30)
     skip_before       = STEPS.index(args.from_step) if args.from_step else 0
+
+    # Cloud config (used only with --cloud)
+    cloud_cfg   = cfg.get("cloud", {})
+    cloud_iters = args.iters or cloud_cfg.get("iterations", 30000)
+    local_iters = args.iters or cfg["opensplat"]["iterations"]
+    cloud_gpu   = cloud_cfg.get("gpu", "NVIDIA GeForce RTX 4090")
+    cloud_image = cloud_cfg.get("image", "kurkista/opensplat-cuda:latest")
 
     # ── Input validation ─────────────────────────────────────────────────────
     input_path = Path(args.input).resolve()
@@ -145,7 +224,7 @@ def main() -> None:
     if is_video:
         guard_tool("ffmpeg", "Run: brew install ffmpeg")
     guard_tool("colmap", "Run: brew install colmap")
-    if not OPENSPLAT.exists():
+    if not args.cloud and not OPENSPLAT.exists():
         print(f"ERROR: opensplat binary not found at {OPENSPLAT}\nRun: bash install.sh")
         sys.exit(1)
 
@@ -163,11 +242,14 @@ def main() -> None:
             d.mkdir(parents=True, exist_ok=True)
 
     # ── Summary ──────────────────────────────────────────────────────────────
+    iters_display = cloud_iters if args.cloud else local_iters
     print(f"\n{'━' * 60}")
     print(f"  Project  : {name}")
     print(f"  Input    : {input_path}")
     print(f"  Output   : {out_ply}")
-    print(f"  Matcher  : {matcher}  |  Iterations : {iters}")
+    print(f"  Matcher  : {matcher}  |  Iterations : {iters_display}")
+    if args.cloud:
+        print(f"  Training : cloud GPU ({args.cloud}, {cloud_gpu})")
     if args.from_step:
         print(f"  Resuming from: {args.from_step}")
     if args.dry_run:
@@ -177,10 +259,6 @@ def main() -> None:
     total = len(STEPS)
 
     # ── Step 1: Frame extraction ──────────────────────────────────────────────
-    # colmap_images is the real directory COLMAP and OpenSplat read from.
-    # For JPEG folders we pass input_path directly (no symlink indirection that
-    # can confuse COLMAP's relative-path bookkeeping).
-    # For video / converted images it is the frames/ dir we write to.
     if is_video:
         colmap_images = frames
     elif is_images:
@@ -197,7 +275,6 @@ def main() -> None:
                 frames.mkdir(parents=True, exist_ok=True)
 
     if not args.dry_run:
-        # OpenSplat expects colmap/images/ to exist — symlink it to the real image dir
         images_ln = colmap / "images"
         if images_ln.is_symlink():
             images_ln.unlink()
@@ -218,7 +295,6 @@ def main() -> None:
         elif already_jpeg:
             print(f"All JPEGs in input folder ({len(source_images)} images) — used directly, no copy.")
         else:
-            # Convert PNG/TIFF/DNG → JPEG (3–5× smaller; COLMAP needs no lossless data)
             print(f"Converting {len(source_images)} images to JPEG (saves ~70% disk vs PNG)...")
             for i, img in enumerate(source_images, 1):
                 out = frames / f"{i:04d}.jpg"
@@ -280,18 +356,31 @@ def main() -> None:
     else:
         print(f"\n  Skipping: mapping")
 
-    # ── Step 5: Nerfstudio Gaussian Splat training ──────────────────────────
+    # ── Step 5: 3DGS training ─────────────────────────────────────────────────
     if STEPS.index("train") >= skip_before:
-        step_header(5, total, f"OpenSplat — 3DGS training ({iters} iterations, CPU)")
-        print("  (Running on CPU — Metal toolchain not available on macOS 26 / Xcode 26.5)")
-        # OMP_NUM_THREADS=1 is required even in CPU mode: both PyTorch and OpenSplat
-        # bundle libomp, and without this the mutex initialisation races and crashes.
-        splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
-        run([OPENSPLAT, colmap, "-n", iters, "-o", out_ply, "--cpu",
-             "--sh-degree", sh_degree,
-             "--num-downscales", num_downscales,
-             "--reset-alpha-every", reset_alpha_every],
-            log_path, args.dry_run, env=splat_env)
+        if args.cloud:
+            step_header(5, total, f"OpenSplat — cloud GPU training ({cloud_iters} iters, {cloud_gpu})")
+            _cloud_train(
+                colmap_dir  = colmap,
+                images_dir  = colmap / "images",
+                out_ply     = out_ply,
+                iters       = cloud_iters,
+                gpu         = cloud_gpu,
+                image       = cloud_image,
+                log_path    = log_path,
+                dry_run     = args.dry_run,
+            )
+        else:
+            step_header(5, total, f"OpenSplat — 3DGS training ({local_iters} iterations, CPU)")
+            print("  (Running on CPU — Metal toolchain not available on macOS 26 / Xcode 26.5)")
+            # OMP_NUM_THREADS=1 is required even in CPU mode: both PyTorch and OpenSplat
+            # bundle libomp, and without this the mutex initialisation races and crashes.
+            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
+            run([OPENSPLAT, colmap, "-n", local_iters, "-o", out_ply, "--cpu",
+                 "--sh-degree", sh_degree,
+                 "--num-downscales", num_downscales,
+                 "--reset-alpha-every", reset_alpha_every],
+                log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:
             print(f"\n{'━' * 60}")

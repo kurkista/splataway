@@ -165,6 +165,11 @@ splataway/
 ├── watch.sh          launchd-triggered inbox processor
 ├── install.sh        One-time setup
 ├── config.toml       Default settings
+├── Dockerfile        Pre-built OpenSplat CUDA image for cloud GPU
+├── cloud/
+│   ├── pack.py       Scene packager (colmap + images → tar)
+│   ├── runpod_api.py Pod lifecycle (create, SSH, terminate)
+│   └── transfer.py   Upload/download via SFTP
 │
 ├── inbox/            Drop files here (gitignored)
 ├── output/           splat.ply output per project (gitignored)
@@ -185,9 +190,43 @@ splataway/
 
 ---
 
+## Cloud GPU training
+
+Run COLMAP locally (fast), train on a cloud RTX 4090 (~20 min, ~$0.20), download the `.ply`.
+
+**Setup (one time):**
+
+```bash
+# 1. Get a RunPod API key at runpod.io/console/user/settings
+export RUNPOD_API_KEY=your_key_here
+
+# 2. Build and push the pre-built Docker image (requires Docker Desktop)
+docker buildx build --platform linux/amd64 \
+  -t kurkista/opensplat-cuda:latest --push .
+```
+
+**Run:**
+
+```bash
+# Full pipeline — COLMAP local, training on cloud RTX 4090
+python3 splat.py inbox/scene/ --cloud runpod
+
+# COLMAP already done — just re-train on GPU
+python3 splat.py output/scene/ --from-step train --cloud runpod
+
+# Check what would happen without spending anything
+python3 splat.py inbox/scene/ --cloud runpod --dry-run
+```
+
+The pod is always terminated in a `finally` block — no orphaned pods even if training fails.
+
+Cloud settings (iterations, GPU type, Docker image) are in the `[cloud]` section of `config.toml`.
+
+---
+
 ## Roadmap
 
-- [ ] `--cloud runpod` — pack COLMAP output, spin up RTX 4090, train, download `.ply` (~$0.50/run)
+- [x] `--cloud runpod` — pack COLMAP output, spin up RTX 4090, train, download `.ply`
 - [ ] Scene orientation — align world "up" with gravity before training (fixes tilted scenes)
 - [ ] Floater pruning — remove out-of-bounds Gaussians post-training
 - [ ] Metal GPU support — pending Apple fixing the Xcode 26.5 Metal toolchain bug
