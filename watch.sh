@@ -137,9 +137,14 @@ for item in "${items[@]}"; do
     # ── Run the pipeline ──────────────────────────────────────────────────────
     osascript -e "display notification \"Starting: $name\" with title \"splataway\" subtitle \"Pipeline started\"" 2>/dev/null || true
 
+    # Use cloud GPU automatically if RUNPOD_API_KEY is set; fall back to local CPU
+    CLOUD_FLAG=""
+    [ -n "${RUNPOD_API_KEY:-}" ] && CLOUD_FLAG="--cloud runpod"
+
     if "$PYTHON" "$ROOT/splat.py" "$item" \
         --name "$name" \
         --output "$out_dir/splat.ply" \
+        ${CLOUD_FLAG} \
         2>&1 | tee "$project_log"; then
 
         osascript -e "display notification \"Splat ready — output/$name/\" with title \"splataway\" subtitle \"✓ Complete\"" 2>/dev/null || true
