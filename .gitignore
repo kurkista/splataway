@@ -3,8 +3,11 @@
 OpenSplat/
 libtorch/
 
-# Project working directories (large binary data)
+# Project working directories and outputs (large binary data)
 projects/
+output/
+archive/
+inbox/
 
 # macOS
 .DS_Store
