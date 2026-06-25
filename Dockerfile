@@ -11,7 +11,7 @@ RUN mkdir build && cd build && \
       -DCMAKE_BUILD_TYPE=Release \
       -DGPU_RUNTIME=CUDA \
       -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/torch \
-      -DOpenCV_DIR=/usr/lib/x86_64-linux-gnu/cmake/opencv4 && \
+      -DCMAKE_EXE_LINKER_FLAGS="-lopencv_imgcodecs" && \
     make -j$(nproc)
 
 ENV OPENSPLAT=/opensplat/build/opensplat
