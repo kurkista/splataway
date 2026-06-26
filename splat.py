@@ -266,20 +266,25 @@ def main() -> None:
             f for f in input_path.iterdir()
             if f.suffix.lower() in IMAGE_EXTENSIONS
         )
-        already_jpeg = all(f.suffix.lower() in {".jpg", ".jpeg"} for f in source_images)
-        if already_jpeg:
-            colmap_images = input_path.resolve()
+        if not source_images:
+            # Input dir has no images at its top level — it's a COLMAP directory.
+            # The colmap/images symlink was established by a prior run; don't touch it.
+            colmap_images = None
+            already_jpeg = True
         else:
-            colmap_images = frames
-            if not args.dry_run:
-                frames.mkdir(parents=True, exist_ok=True)
+            already_jpeg = all(f.suffix.lower() in {".jpg", ".jpeg"} for f in source_images)
+            if already_jpeg:
+                colmap_images = input_path.resolve()
+            else:
+                colmap_images = frames
+                if not args.dry_run:
+                    frames.mkdir(parents=True, exist_ok=True)
 
-    if not args.dry_run:
+    if not args.dry_run and colmap_images is not None:
         images_ln = colmap / "images"
-        # Only update the symlink if the new target differs and isn't circular
         new_target = Path(colmap_images).resolve()
         current_target = images_ln.resolve() if images_ln.exists() else None
-        if new_target != colmap.resolve() and new_target != current_target:
+        if new_target != current_target:
             if images_ln.is_symlink():
                 images_ln.unlink()
             if not images_ln.exists():
