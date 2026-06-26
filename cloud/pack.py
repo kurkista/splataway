@@ -3,8 +3,8 @@ cloud/pack.py — pack a COLMAP scene into a self-contained tar for upload.
 
 OpenSplat on the remote pod expects:
   scene/
-    images/           ← actual image files (symlink resolved)
     colmap/
+      images/         ← actual image files (symlink resolved)
       sparse/0/       ← cameras.bin, images.bin, points3D.bin
 """
 
@@ -49,7 +49,7 @@ def pack_scene(colmap_dir: Path, images_dir: Path, dest_dir: Path) -> Path:
         with tarfile.open(fileobj=raw_fh, mode="w:gz") as tar:
             # Images → scene/images/
             for img in image_files:
-                tar.add(img, arcname=f"scene/images/{img.name}")
+                tar.add(img, arcname=f"scene/colmap/images/{img.name}")
 
             # COLMAP sparse → scene/colmap/sparse/0/
             for f in sparse_dir.iterdir():
