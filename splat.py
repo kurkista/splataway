@@ -276,10 +276,14 @@ def main() -> None:
 
     if not args.dry_run:
         images_ln = colmap / "images"
-        if images_ln.is_symlink():
-            images_ln.unlink()
-        if not images_ln.exists():
-            images_ln.symlink_to(colmap_images)
+        # Only update the symlink if the new target differs and isn't circular
+        new_target = Path(colmap_images).resolve()
+        current_target = images_ln.resolve() if images_ln.exists() else None
+        if new_target != colmap.resolve() and new_target != current_target:
+            if images_ln.is_symlink():
+                images_ln.unlink()
+            if not images_ln.exists():
+                images_ln.symlink_to(colmap_images)
 
     if STEPS.index("frames") >= skip_before:
         step_header(1, total, "Frame extraction")
