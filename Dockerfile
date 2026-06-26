@@ -1,26 +1,37 @@
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+# PyTorch's TorchConfig.cmake sets TORCH_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+# and propagates it as INTERFACE_COMPILE_OPTIONS to all code linked against torch.
+# Ubuntu's apt OpenCV uses new ABI (CXX11_ABI=1), so cv::imwrite mangles differently
+# at compile vs link time → undefined reference.
+# Fix: build OpenCV from source with the same old ABI so the mangled names match.
 
-# Single source of truth for OpenCV: only the apt package, no pre-existing torch headers
 RUN apt-get update && apt-get install -y \
-    python3.10 python3-pip \
-    cmake libopencv-dev libglm-dev git pkg-config && \
+    cmake libglm-dev git pkg-config \
+    libjpeg-dev libpng-dev libtiff-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch for CUDA 11.8 (pinned version)
-RUN pip3 install torch==2.1.0 --index-url https://download.pytorch.org/whl/cu118
+RUN git clone --depth 1 --branch 4.8.0 https://github.com/opencv/opencv.git /opencv && \
+    mkdir /opencv/build && cd /opencv/build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0" \
+      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+      -DWITH_CUDA=OFF -DWITH_GTK=OFF -DWITH_QT=OFF \
+      -DBUILD_opencv_python2=OFF -DBUILD_opencv_python3=OFF \
+      -DBUILD_LIST=core,imgproc,highgui,calib3d,imgcodecs,features2d,flann && \
+    make -j$(nproc) && make install && ldconfig && \
+    rm -rf /opencv
 
 RUN git clone https://github.com/pierotofy/OpenSplat.git /opensplat
 WORKDIR /opensplat
-# opencv_imgcodecs is missing from OpenSplat's hardcoded OpenCV_LIBS list
 RUN sed -i 's/opencv_calib3d)/opencv_calib3d opencv_imgcodecs)/' CMakeLists.txt
-RUN TORCH_CMAKE=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)") && \
-    mkdir build && cd build && \
+RUN mkdir build && cd build && \
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DGPU_RUNTIME=CUDA \
-      -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" && \
+      -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/torch && \
     make -j$(nproc)
 
 ENV OPENSPLAT=/opensplat/build/opensplat
