@@ -49,8 +49,11 @@ def wait_ready(pod_id: str, timeout: int = 180) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         pod = _runpod.get_pod(pod_id)
+        if pod is None:
+            time.sleep(5)
+            continue
         status = pod.get("desiredStatus") or pod.get("status", "")
-        if status == "RUNNING" and pod.get("runtime", {}).get("ports"):
+        if status == "RUNNING" and (pod.get("runtime") or {}).get("ports"):
             print(" ready.")
             return pod
         print(".", end="", flush=True)
