@@ -34,6 +34,10 @@ CONFIG_FILE = SCRIPT_DIR / "config.toml"
 PROJECTS    = SCRIPT_DIR / "projects"
 OPENSPLAT   = SCRIPT_DIR / "OpenSplat" / "build" / "opensplat"
 
+# Vocabulary tree for COLMAP vocab_tree_matcher (auto-downloaded on first use)
+VOCAB_TREE_URL  = "https://demuc.de/colmap/vocab_tree_flickr100K_words32K.bin"
+VOCAB_TREE_PATH = SCRIPT_DIR / "tools" / "vocab_tree_32K.bin"
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".dng"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mts", ".avi", ".mkv", ".m4v"}
 
@@ -82,6 +86,18 @@ def guard_tool(name: str, hint: str = "") -> None:
     if not shutil.which(name):
         print(f"ERROR: '{name}' not found. {hint}")
         sys.exit(1)
+
+
+def ensure_vocab_tree() -> Path:
+    """Download COLMAP vocab tree on first use (~40 MB, stored in tools/)."""
+    if VOCAB_TREE_PATH.exists():
+        return VOCAB_TREE_PATH
+    import urllib.request
+    VOCAB_TREE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    print(f"  Downloading vocab tree (~40 MB) → {VOCAB_TREE_PATH}")
+    urllib.request.urlretrieve(VOCAB_TREE_URL, VOCAB_TREE_PATH)
+    print("  Done.")
+    return VOCAB_TREE_PATH
 
 
 # ── Cloud training ─────────────────────────────────────────────────────────────
@@ -164,8 +180,8 @@ def main() -> None:
     parser.add_argument("--iters",      type=int,   help="OpenSplat training iterations")
     parser.add_argument(
         "--matcher",
-        choices=["sequential", "exhaustive"],
-        help="'sequential' for video/ordered frames; 'exhaustive' for photo sets",
+        choices=["sequential", "exhaustive", "vocab_tree"],
+        help="'sequential' for video; 'vocab_tree' for multi-mission/unordered sets; 'exhaustive' for small sets",
     )
     parser.add_argument(
         "--from-step",
@@ -335,10 +351,10 @@ def main() -> None:
     # ── Step 3: COLMAP feature matching ──────────────────────────────────────
     if STEPS.index("matching") >= skip_before:
         step_header(3, total, f"COLMAP — {matcher} matching")
-        run([
-            "colmap", f"{matcher}_matcher",
-            "--database_path", db,
-        ], log_path, args.dry_run)
+        match_cmd = ["colmap", f"{matcher}_matcher", "--database_path", db]
+        if matcher == "vocab_tree":
+            match_cmd += ["--VocabTreeMatching.vocab_tree_path", ensure_vocab_tree()]
+        run(match_cmd, log_path, args.dry_run)
     else:
         print(f"\n  Skipping: matching")
 

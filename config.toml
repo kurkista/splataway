@@ -6,8 +6,9 @@ fps     = 2      # frames/sec extracted from video; 1 for slow drone, 3 for fast
 quality = 1      # JPEG qscale (1 = best quality / largest file)
 
 [colmap]
-# 'sequential' — ordered frames from a single video pass (much faster, preferred for drone)
-# 'exhaustive' — unordered photo sets (cemetery walk-around, hand-held survey)
+# 'sequential'  — ordered frames from a single video pass (fastest; single mission)
+# 'vocab_tree'  — multi-mission or unordered sets; matches by visual similarity (recommended for drone)
+# 'exhaustive'  — small unordered sets (<300 images); correct but O(n²)
 matcher       = "sequential"
 single_camera = true   # true if all images share one lens (drone, single camera); false for mixed sets
 
