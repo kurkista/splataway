@@ -96,7 +96,8 @@ def ensure_vocab_tree(db_path: Path, colmap_dir: Path) -> Path:
         ["colmap", "vocab_tree_builder",
          "--database_path", str(db_path),
          "--vocab_tree_path", str(tree_path),
-         "--num_visual_words", "32768"],
+         "--num_visual_words", "1024",
+         "--max_num_descriptors", "500000"],
         check=True,
     )
     print("  Vocab tree ready.")
