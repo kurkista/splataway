@@ -42,7 +42,7 @@ def create_pod(gpu: str, image: str, name: str) -> dict:
     return pod
 
 
-def wait_ready(pod_id: str, timeout: int = 180) -> dict:
+def wait_ready(pod_id: str, timeout: int = 600) -> dict:
     """Poll until pod is RUNNING and has SSH host info. Returns updated pod dict."""
     _client()
     print(f"  Waiting for pod {pod_id} to start…", end="", flush=True)
