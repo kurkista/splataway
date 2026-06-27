@@ -145,7 +145,7 @@ def _cloud_train(
 
         # Train
         remote_cmd = (
-            f"/opensplat/build/opensplat /workspace/scene/colmap"
+            f"OMP_NUM_THREADS=4 /opensplat/build/opensplat /workspace/scene/colmap"
             f" -n {iters}"
             f" -o /workspace/splat.ply"
             f" --sh-degree 3"
