@@ -87,6 +87,7 @@ def run_remote(pod: dict, cmd: str, log_file=None) -> int:
     ssh = _ssh_connect(pod)
     try:
         transport = ssh.get_transport()
+        transport.set_keepalive(30)  # send keepalive every 30s — prevents drop on long COLMAP runs
         channel = transport.open_session()
         channel.set_combine_stderr(True)
         channel.exec_command(cmd)
