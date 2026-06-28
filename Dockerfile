@@ -53,7 +53,8 @@ RUN cmake .. \
       -DCUDA_ENABLED=ON \
       -DGUI_ENABLED=OFF \
       -DTESTS_ENABLED=OFF \
-      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda
+      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
+      -DCMAKE_CUDA_ARCHITECTURES=all-major
 RUN make -j2
 RUN make install && ldconfig
 WORKDIR /workspace
