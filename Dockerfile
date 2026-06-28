@@ -32,7 +32,7 @@ RUN mkdir build && cd build && \
       -DCMAKE_BUILD_TYPE=Release \
       -DGPU_RUNTIME=CUDA \
       -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/torch && \
-    make -j$(nproc)
+    make -j2
 
 # COLMAP with CUDA — GPU feature extraction and matching, no GUI (headless-safe)
 RUN apt-get update && apt-get install -y \
