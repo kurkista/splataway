@@ -444,12 +444,9 @@ def main() -> None:
                 cloud_colmap = cloud_colmap,
             )
         else:
-            step_header(5, total, f"OpenSplat — 3DGS training ({local_iters} iterations, CPU)")
-            print("  (Running on CPU — Metal toolchain not available on macOS 26 / Xcode 26.5)")
-            # OMP_NUM_THREADS=1 is required even in CPU mode: both PyTorch and OpenSplat
-            # bundle libomp, and without this the mutex initialisation races and crashes.
-            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
-            run([OPENSPLAT, colmap, "-n", local_iters, "-o", out_ply, "--cpu",
+            step_header(5, total, f"OpenSplat — 3DGS training ({local_iters} iterations, Metal GPU)")
+            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE"}
+            run([OPENSPLAT, colmap, "-n", local_iters, "-o", out_ply,
                  "--sh-degree", sh_degree,
                  "--num-downscales", num_downscales,
                  "--reset-alpha-every", reset_alpha_every],
