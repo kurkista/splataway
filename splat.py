@@ -47,9 +47,14 @@ def load_config() -> dict:
         return tomllib.load(f)
 
 
+_pipeline_start: float = 0.0
+
 def step_header(n: int, total: int, label: str) -> None:
+    import time
+    elapsed = time.time() - _pipeline_start
     bar = "=" * 60
-    print(f"\n{bar}\n  [{n}/{total}] {label}\n{bar}\n", flush=True)
+    elapsed_str = f"  (+{elapsed/60:.1f} min elapsed)" if n > 1 else ""
+    print(f"\n{bar}\n  [{n}/{total}] {label}{elapsed_str}\n{bar}\n", flush=True)
 
 
 def run(cmd: list, log_path: Path, dry_run: bool = False, env: dict | None = None) -> None:
@@ -190,6 +195,10 @@ def _cloud_train(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
+    import time
+    global _pipeline_start
+    _pipeline_start = time.time()
+
     parser = argparse.ArgumentParser(
         description="Automated Gaussian Splat pipeline (COLMAP + OpenSplat)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -447,8 +456,10 @@ def main() -> None:
                 log_path, args.dry_run, env=splat_env)
 
         if not args.dry_run:
+            import time
+            total_min = (time.time() - _pipeline_start) / 60
             print(f"\n{'━' * 60}")
-            print(f"  Done.")
+            print(f"  Done.  Total time: {total_min:.1f} min")
             print(f"  Output : {out_ply}")
             print(f"  Log    : {log_path}")
             print(f"  Viewer : https://superspl.at/editor  (drag & drop the .ply)")
