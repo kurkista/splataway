@@ -121,6 +121,16 @@ def run_remote(pod: dict, cmd: str, log_file=None) -> int:
         ssh.close()
 
 
+def _ssh_output(pod: dict, cmd: str) -> str:
+    """Run a short command on pod and return its stdout as a string."""
+    ssh = _ssh_connect(pod)
+    try:
+        _, stdout, _ = ssh.exec_command(cmd)
+        return stdout.read().decode(errors="replace")
+    finally:
+        ssh.close()
+
+
 def install_colmap(pod: dict) -> None:
     """Install COLMAP on the pod via apt (CPU build, much faster than Apple Silicon)."""
     print("  Installing COLMAP on pod…")
@@ -133,63 +143,97 @@ def install_colmap(pod: dict) -> None:
 def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
     """
     Run COLMAP feature extraction, matching, and mapping on the pod.
+    Writes a shell script, runs it detached with nohup, polls for completion
+    via fresh SSH connections so a dropped session doesn't kill the job.
     Expects images at /workspace/scene/images/.
     Produces sparse reconstruction at /workspace/scene/colmap/sparse/0/.
     """
-    db   = "/workspace/scene/colmap/database.db"
-    imgs = "/workspace/scene/images"
+    import base64
+
+    db     = "/workspace/scene/colmap/database.db"
+    imgs   = "/workspace/scene/images"
     sparse = "/workspace/scene/colmap/sparse"
+    remote_log  = "/tmp/colmap.log"
+    done_flag   = "/tmp/colmap_done"
+    env    = "QT_QPA_PLATFORM=offscreen"
 
-    env = "QT_QPA_PLATFORM=offscreen"
-
-    cmds = [
+    # Build the full pipeline as a single bash script
+    steps = [
+        "#!/bin/bash",
+        "set -e",
         f"mkdir -p {sparse}",
-        (
-            f"{env} colmap feature_extractor"
-            f" --database_path {db}"
-            f" --image_path {imgs}"
-            f" --ImageReader.single_camera 1"
-            f" --SiftExtraction.use_gpu 0"
-        ),
+        (f"{env} colmap feature_extractor"
+         f" --database_path {db} --image_path {imgs}"
+         f" --ImageReader.single_camera 1"
+         f" --SiftExtraction.use_gpu 0"
+         f" --SiftExtraction.num_threads 4"),
     ]
 
     if matcher == "vocab_tree":
         vtree = "/workspace/vocab_tree.bin"
-        cmds += [
-            (
-                f"{env} colmap vocab_tree_builder"
-                f" --database_path {db}"
-                f" --vocab_tree_path {vtree}"
-                f" --num_visual_words 1024"
-                f" --max_num_descriptors 500000"
-            ),
-            (
-                f"{env} colmap vocab_tree_matcher"
-                f" --database_path {db}"
-                f" --VocabTreeMatching.vocab_tree_path {vtree}"
-            ),
+        steps += [
+            (f"{env} colmap vocab_tree_builder"
+             f" --database_path {db} --vocab_tree_path {vtree}"
+             f" --num_visual_words 1024 --max_num_descriptors 500000"),
+            (f"{env} colmap vocab_tree_matcher"
+             f" --database_path {db}"
+             f" --VocabTreeMatching.vocab_tree_path {vtree}"),
         ]
     else:
-        cmds.append(
-            f"{env} colmap {matcher}_matcher --database_path {db}"
-        )
+        steps.append(f"{env} colmap {matcher}_matcher --database_path {db}")
 
-    cmds.append(
-        f"{env} colmap mapper"
-        f" --database_path {db}"
-        f" --image_path {imgs}"
-        f" --output_path {sparse}"
-    )
+    steps += [
+        (f"{env} colmap mapper"
+         f" --database_path {db} --image_path {imgs}"
+         f" --output_path {sparse}"),
+        f"touch {done_flag}",
+    ]
 
-    for cmd in cmds:
-        print(f"  $ {cmd}")
-        rc = run_remote(pod, cmd, log_file=log_file)
-        if rc != 0:
-            raise RuntimeError(f"Remote COLMAP step failed (exit {rc}): {cmd}")
+    script = "\n".join(steps) + "\n"
+
+    # Upload via base64 to sidestep shell quoting issues
+    b64 = base64.b64encode(script.encode()).decode()
+    run_remote(pod, f"echo '{b64}' | base64 -d > /tmp/colmap.sh && chmod +x /tmp/colmap.sh")
+    run_remote(pod, f"nohup /tmp/colmap.sh > {remote_log} 2>&1 &")
+    print("  COLMAP pipeline started on pod (detached)…")
+
+    # Poll for completion via fresh SSH connections every 30 s
+    seen_lines = 0
+    while True:
+        time.sleep(30)
+        try:
+            # Stream new log lines
+            new_output = _ssh_output(pod, f"tail -n +{seen_lines + 1} {remote_log} 2>/dev/null")
+            if new_output:
+                lines = new_output.splitlines(keepends=True)
+                seen_lines += len(lines)
+                for line in lines:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    if log_file:
+                        log_file.write(line)
+                        log_file.flush()
+
+            # Check completion sentinel
+            done = _ssh_output(pod, f"test -f {done_flag} && echo YES || echo NO").strip()
+            if done == "YES":
+                print("  COLMAP pipeline complete.")
+                break
+
+            # If no colmap process running and no done flag → failed
+            running = _ssh_output(pod, "pgrep -c colmap || true").strip()
+            if running == "0":
+                tail = _ssh_output(pod, f"tail -30 {remote_log} 2>/dev/null")
+                raise RuntimeError(f"COLMAP pipeline failed on pod. Last output:\n{tail}")
+
+        except RuntimeError:
+            raise
+        except Exception as e:
+            print(f"  (poll error, retrying: {e})")
 
     # Verify reconstruction was produced
-    rc = run_remote(pod, f"test -d {sparse}/0 && echo OK || echo MISSING")
-    if rc != 0:
+    exists = _ssh_output(pod, f"test -d {sparse}/0 && echo YES || echo NO").strip()
+    if exists != "YES":
         raise RuntimeError("COLMAP produced no reconstruction on pod (sparse/0 missing)")
 
 
