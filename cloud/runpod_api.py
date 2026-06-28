@@ -155,35 +155,33 @@ def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
     sparse = "/workspace/scene/colmap/sparse"
     remote_log  = "/tmp/colmap.log"
     done_flag   = "/tmp/colmap_done"
-    env    = "QT_QPA_PLATFORM=offscreen"
 
-    # Build the full pipeline as a single bash script
+    # Build the full pipeline as a single bash script.
+    # GPU COLMAP (CUDA, GUI_ENABLED=OFF) — no Qt or OpenGL workarounds needed.
     steps = [
         "#!/bin/bash",
         "set -e",
         f"mkdir -p {sparse}",
-        (f"{env} colmap feature_extractor"
+        (f"colmap feature_extractor"
          f" --database_path {db} --image_path {imgs}"
-         f" --ImageReader.single_camera 1"
-         f" --SiftExtraction.use_gpu 0"
-         f" --SiftExtraction.num_threads 4"),
+         f" --ImageReader.single_camera 1"),
     ]
 
     if matcher == "vocab_tree":
         vtree = "/workspace/vocab_tree.bin"
         steps += [
-            (f"{env} colmap vocab_tree_builder"
+            (f"colmap vocab_tree_builder"
              f" --database_path {db} --vocab_tree_path {vtree}"
              f" --num_visual_words 1024"),
-            (f"{env} colmap vocab_tree_matcher"
+            (f"colmap vocab_tree_matcher"
              f" --database_path {db}"
              f" --VocabTreeMatching.vocab_tree_path {vtree}"),
         ]
     else:
-        steps.append(f"{env} colmap {matcher}_matcher --database_path {db}")
+        steps.append(f"colmap {matcher}_matcher --database_path {db}")
 
     steps += [
-        (f"{env} colmap mapper"
+        (f"colmap mapper"
          f" --database_path {db} --image_path {imgs}"
          f" --output_path {sparse}"),
         f"touch {done_flag}",

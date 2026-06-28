@@ -34,5 +34,24 @@ RUN mkdir build && cd build && \
       -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/torch && \
     make -j$(nproc)
 
+# COLMAP with CUDA — GPU feature extraction and matching, no GUI (headless-safe)
+RUN apt-get update && apt-get install -y \
+    libboost-program-options-dev libboost-filesystem-dev \
+    libboost-graph-dev libboost-system-dev \
+    libeigen3-dev libflann-dev libfreeimage-dev libmetis-dev \
+    libgoogle-glog-dev libgflags-dev libsqlite3-dev \
+    libglew-dev libcgal-dev libceres-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/colmap/colmap.git /colmap && \
+    cd /colmap && mkdir build && cd build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCUDA_ENABLED=ON \
+      -DGUI_ENABLED=OFF \
+      -DTESTS_ENABLED=OFF && \
+    make -j$(nproc) && make install && ldconfig && \
+    rm -rf /colmap
+
 ENV OPENSPLAT=/opensplat/build/opensplat
 WORKDIR /workspace

@@ -155,9 +155,8 @@ def _cloud_train(
         print("  Extracting…")
         run_remote(pod, f"tar -xzf {remote_tar} -C /workspace/")
 
-        # COLMAP on pod (large dataset path)
+        # COLMAP on pod (large dataset path) — COLMAP baked into Docker image
         if cloud_colmap:
-            install_colmap(pod)
             print(f"  Running COLMAP ({matcher} matcher) on pod…")
             with open(log_path, "a") as log:
                 run_colmap_remote(pod, matcher, log_file=log)
