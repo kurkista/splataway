@@ -31,29 +31,18 @@
 
 ---
 
-## Next step: GPU COLMAP in Docker
+## Docker image: COLMAP from source (CPU, no GUI)
 
-Rebuild `kurkista/opensplat-cuda:latest` to include COLMAP compiled with CUDA.
-GPU feature extraction + matching cuts the COLMAP phase from hours to minutes.
+`kurkista/opensplat-cuda:latest` now includes COLMAP 3.9.1 compiled from source with:
+- `-DCUDA_ENABLED=OFF` — GPU COLMAP in Docker requires a GPU-enabled builder; GitHub Actions and local M2 both fail nvcc compiler detection without NVIDIA drivers
+- `-DGUI_ENABLED=OFF` — headless-safe, no Qt/OpenGL issues on pod
+- All COLMAP flags available (no missing `--max_num_descriptors` etc.)
+- No more `apt install colmap` at pod startup — COLMAP is baked in
 
-See branch: `feat/cuda-colmap`
+### Why GPU COLMAP in Docker failed
+Building CUDA code in a Docker image requires `nvcc` to compile a test binary during cmake's compiler detection. This fails unless the builder host has NVIDIA GPU drivers installed. Neither GitHub Actions (`ubuntu-latest`) nor local M2 Mac (QEMU emulation) qualify. A GPU-enabled self-hosted runner would solve this.
 
-### Target Dockerfile additions
-```dockerfile
-# COLMAP dependencies
-RUN apt-get update && apt-get install -y \
-    libboost-all-dev libfreeimage-dev libmetis-dev \
-    libgoogle-glog-dev libgflags-dev libsqlite3-dev \
-    libglew-dev qtbase5-dev libqt5opengl5-dev \
-    libcgal-dev libceres-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Build COLMAP from source with CUDA
-RUN git clone https://github.com/colmap/colmap /colmap && \
-    cd /colmap && mkdir build && cd build && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DCUDA_ENABLED=ON && \
-    make -j$(nproc) && make install
-```
-
-With GPU COLMAP, the routing stays the same — only the execution speed changes.
-Estimated matching time with GPU: ~2–5 min for 2016 images vs 2+ hours on CPU.
+### Speed workaround for large datasets
+For >500 image multi-mission sets, vocab_tree matching on CPU takes 2+ hours. Practical options:
+1. Subsample to ~400 images before upload (every Nth per mission)
+2. Use sequential matcher per mission + accept weaker cross-mission connections
