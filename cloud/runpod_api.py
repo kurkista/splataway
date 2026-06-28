@@ -139,10 +139,12 @@ def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
     imgs = "/workspace/scene/images"
     sparse = "/workspace/scene/colmap/sparse"
 
+    env = "QT_QPA_PLATFORM=offscreen"
+
     cmds = [
         f"mkdir -p {sparse}",
         (
-            f"colmap feature_extractor"
+            f"{env} colmap feature_extractor"
             f" --database_path {db}"
             f" --image_path {imgs}"
             f" --ImageReader.single_camera 1"
@@ -153,25 +155,25 @@ def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
         vtree = "/workspace/vocab_tree.bin"
         cmds += [
             (
-                f"colmap vocab_tree_builder"
+                f"{env} colmap vocab_tree_builder"
                 f" --database_path {db}"
                 f" --vocab_tree_path {vtree}"
                 f" --num_visual_words 1024"
                 f" --max_num_descriptors 500000"
             ),
             (
-                f"colmap vocab_tree_matcher"
+                f"{env} colmap vocab_tree_matcher"
                 f" --database_path {db}"
                 f" --VocabTreeMatching.vocab_tree_path {vtree}"
             ),
         ]
     else:
         cmds.append(
-            f"colmap {matcher}_matcher --database_path {db}"
+            f"{env} colmap {matcher}_matcher --database_path {db}"
         )
 
     cmds.append(
-        f"colmap mapper"
+        f"{env} colmap mapper"
         f" --database_path {db}"
         f" --image_path {imgs}"
         f" --output_path {sparse}"
