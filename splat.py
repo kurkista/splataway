@@ -109,6 +109,91 @@ def ensure_vocab_tree(db_path: Path, colmap_dir: Path) -> Path:
     return tree_path
 
 
+def _colmap4_to_3bin(sparse0_dir: Path, log_path: Path) -> None:
+    """Convert COLMAP 4.x binary to 3.x binary in-place so OpenSplat can read it.
+
+    COLMAP 4.0 changed images.bin causing an OpenMP crash in OpenSplat's tensor
+    clone step (PyTorch libomp conflict when parallelising large tensor copy).
+    The text format is stable; we round-trip through it to produce the old binary.
+    Only runs if the text conversion produces a different-size images.bin.
+    """
+    import struct
+
+    txt_dir = sparse0_dir.parent / (sparse0_dir.name + "_txt")
+    if txt_dir.exists() and (txt_dir / "cameras.txt").exists():
+        pass  # already converted by a previous step
+    else:
+        txt_dir.mkdir(exist_ok=True)
+        subprocess.run(
+            ["colmap", "model_converter",
+             "--input_path", str(sparse0_dir),
+             "--output_path", str(txt_dir),
+             "--output_type", "TXT"],
+            check=True, capture_output=True,
+        )
+
+    # Write COLMAP 3.x-compatible cameras.bin, images.bin, points3D.bin
+    MODEL_IDS = {
+        "SIMPLE_PINHOLE": 0, "PINHOLE": 1, "SIMPLE_RADIAL": 2, "RADIAL": 3,
+        "OPENCV": 4, "OPENCV_FISHEYE": 5, "FULL_OPENCV": 6, "FOV": 7,
+        "SIMPLE_RADIAL_FISHEYE": 8, "RADIAL_FISHEYE": 9, "THIN_PRISM_FISHEYE": 10,
+    }
+
+    def _write_cameras(src: Path, dst: Path) -> None:
+        rows = [l for l in src.read_text().splitlines() if l and not l.startswith("#")]
+        cams = []
+        for l in rows:
+            p = l.split(); cams.append((int(p[0]), MODEL_IDS[p[1]], int(p[2]), int(p[3]), [float(x) for x in p[4:]]))
+        with open(dst, "wb") as f:
+            f.write(struct.pack("<Q", len(cams)))
+            for cid, mid, w, h, params in cams:
+                f.write(struct.pack("<IiQQ", cid, mid, w, h))
+                for v in params: f.write(struct.pack("<d", v))
+
+    def _write_images(src: Path, dst: Path) -> None:
+        raw = [l for l in src.read_text().splitlines() if l and not l.startswith("#")]
+        images = []
+        i = 0
+        while i < len(raw):
+            p = raw[i].split(); i += 1
+            img_id, qw, qx, qy, qz = int(p[0]), float(p[1]), float(p[2]), float(p[3]), float(p[4])
+            tx, ty, tz, cam_id, name = float(p[5]), float(p[6]), float(p[7]), int(p[8]), p[9]
+            pts = []
+            if i < len(raw):
+                toks = raw[i].split(); i += 1
+                for j in range(0, len(toks), 3):
+                    pts.append((float(toks[j]), float(toks[j+1]), int(toks[j+2])))
+            images.append((img_id, qw, qx, qy, qz, tx, ty, tz, cam_id, name, pts))
+        with open(dst, "wb") as f:
+            f.write(struct.pack("<Q", len(images)))
+            for img_id, qw, qx, qy, qz, tx, ty, tz, cam_id, name, pts in images:
+                f.write(struct.pack("<I", img_id))
+                f.write(struct.pack("<ddddddd", qw, qx, qy, qz, tx, ty, tz))
+                f.write(struct.pack("<I", cam_id))
+                f.write(name.encode() + b"\x00")
+                f.write(struct.pack("<Q", len(pts)))
+                for x, y, pid in pts: f.write(struct.pack("<ddq", x, y, pid))
+
+    def _write_points3d(src: Path, dst: Path) -> None:
+        rows = [l for l in src.read_text().splitlines() if l and not l.startswith("#")]
+        with open(dst, "wb") as f:
+            f.write(struct.pack("<Q", len(rows)))
+            for l in rows:
+                p = l.split()
+                f.write(struct.pack("<Q", int(p[0])))
+                f.write(struct.pack("<ddd", float(p[1]), float(p[2]), float(p[3])))
+                f.write(struct.pack("<BBB", int(p[4]), int(p[5]), int(p[6])))
+                f.write(struct.pack("<d", float(p[7])))
+                track = [(int(p[k]), int(p[k+1])) for k in range(8, len(p), 2)]
+                f.write(struct.pack("<Q", len(track)))
+                for iid, pidx in track: f.write(struct.pack("<II", iid, pidx))
+
+    print("  Converting COLMAP 4.x binary → 3.x binary for OpenSplat compatibility…")
+    _write_cameras(txt_dir / "cameras.txt", sparse0_dir / "cameras.bin")
+    _write_images(txt_dir / "images.txt", sparse0_dir / "images.bin")
+    _write_points3d(txt_dir / "points3D.txt", sparse0_dir / "points3D.bin")
+
+
 # Images above this count route COLMAP to the cloud pod when --cloud is set
 CLOUD_COLMAP_THRESHOLD = 300
 
@@ -424,6 +509,10 @@ def main() -> None:
                     print("  • Motion blur or blown highlights reducing feature matches")
                     print(f"  • Check {log_path} for COLMAP output")
                     sys.exit(1)
+
+                # COLMAP 4.x outputs images.bin in a format incompatible with OpenSplat.
+                # Convert via stable text format to COLMAP 3.x binary that OpenSplat can read.
+                _colmap4_to_3bin(reconstruction, log_path)
         else:
             print(f"\n  Skipping: mapping")
 
@@ -445,7 +534,7 @@ def main() -> None:
             )
         else:
             step_header(5, total, f"OpenSplat — 3DGS training ({local_iters} iterations, Metal GPU)")
-            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE"}
+            splat_env = {**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE", "OMP_NUM_THREADS": "1"}
             run([OPENSPLAT, colmap, "-n", local_iters, "-o", out_ply,
                  "--sh-degree", sh_degree,
                  "--num-downscales", num_downscales,
