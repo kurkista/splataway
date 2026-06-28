@@ -44,16 +44,20 @@ RUN apt-get update && apt-get install -y \
     libgmp-dev libmpfr-dev libatlas-base-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /colmap && \
-    cd /colmap && mkdir build && cd build && \
-    cmake .. \
+RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /colmap
+WORKDIR /colmap
+RUN mkdir build
+WORKDIR /colmap/build
+RUN cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCUDA_ENABLED=ON \
       -DGUI_ENABLED=OFF \
       -DTESTS_ENABLED=OFF \
-      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda && \
-    make -j2 && make install && ldconfig && \
-    rm -rf /colmap
+      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda
+RUN make -j2
+RUN make install && ldconfig
+WORKDIR /workspace
+RUN rm -rf /colmap
 
 ENV OPENSPLAT=/opensplat/build/opensplat
 WORKDIR /workspace
