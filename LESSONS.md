@@ -46,3 +46,46 @@ Building CUDA code in a Docker image requires `nvcc` to compile a test binary du
 For >500 image multi-mission sets, vocab_tree matching on CPU takes 2+ hours. Practical options:
 1. Subsample to ~400 images before upload (every Nth per mission)
 2. Use sequential matcher per mission + accept weaker cross-mission connections
+
+---
+
+## OpenSplat crash on large reconstructions (COLMAP 4.x + libomp conflict)
+
+Two separate bugs combine to crash OpenSplat when local COLMAP produces a reconstruction
+with many images and points.
+
+### Bug 1: OpenMP libomp conflict → SIGSEGV in tensor clone
+
+**Symptom**: exit -11 immediately after "Reading N points" (on both MPS and CPU).
+
+**Root cause**: PyTorch links against its own libomp; Homebrew LLVM also loads libomp.
+When the points tensor has >~50k entries, `.clone()` triggers an OpenMP parallel copy.
+The two libomp instances conflict during thread initialization → crash at address ~0x580
+in `__kmp_suspend_initialize_thread`.
+
+**Fix**: `OMP_NUM_THREADS=1` prevents OpenMP parallelism entirely, bypassing the conflict.
+
+### Bug 2: COLMAP 4.x images.bin incompatible with OpenSplat
+
+**Symptom**: Same crash as above (masks the real issue), but separate root cause.
+
+**Root cause**: Homebrew updated COLMAP from 3.x to 4.0.4. COLMAP 4.x added a Rig/Frame
+data model but the binary `images.bin` format didn't actually change size — the new model
+writes `frames.bin` and `rigs.bin` as separate files. So `images.bin` is still readable
+by OpenSplat's 3.x reader, and Bug 1 (libomp) was the actual crash.
+
+**Fix**: `OMP_NUM_THREADS=1` (Bug 1 fix) is sufficient. The `_colmap4_to_3bin()` conversion
+is a belt-and-suspenders addition that round-trips through stable TXT format.
+
+### Equirectangular video → COLMAP pipeline
+
+**Problem**: COLMAP can't reconstruct equirectangular images directly with SIMPLE_RADIAL.
+
+**Working solution**: Extract 3 perspective crops per frame (yaw=0°, 90°, 180°) using
+`ffmpeg -vf v360=equirect:rectilinear:yaw=N:v_fov=90:h_fov=90`. Results:
+- 189 perspective crops from 63 frames at 2fps
+- Exhaustive matching (O(n²), ~8 min)
+- 189/189 registered images, 83560 points, 0.576px reprojection error
+
+**Note**: `ffmpeg v360` yaw range is -180 to 180 (not 0 to 360). Use yaw=-90 for 270°.
+**Note**: Use `--ImageReader.single_camera 0` since 3 yaw directions have different intrinsics.
