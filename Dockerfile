@@ -48,13 +48,15 @@ RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /col
 WORKDIR /colmap
 RUN mkdir build
 WORKDIR /colmap/build
-RUN cmake .. \
+RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH \
+    cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCUDA_ENABLED=ON \
       -DGUI_ENABLED=OFF \
       -DTESTS_ENABLED=OFF \
       -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
-      -DCMAKE_CUDA_ARCHITECTURES=all-major
+      -DCMAKE_CUDA_ARCHITECTURES=all-major \
+      -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs"
 RUN make -j2
 RUN make install && ldconfig
 WORKDIR /workspace
