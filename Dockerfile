@@ -34,7 +34,7 @@ RUN mkdir build && cd build && \
       -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/torch && \
     make -j2
 
-# COLMAP with CUDA — GPU feature extraction and matching, no GUI (headless-safe)
+# COLMAP from source — CPU, no GUI (headless-safe, all flags available)
 RUN apt-get update && apt-get install -y \
     libboost-program-options-dev libboost-filesystem-dev \
     libboost-graph-dev libboost-system-dev \
@@ -48,15 +48,11 @@ RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /col
 WORKDIR /colmap
 RUN mkdir build
 WORKDIR /colmap/build
-RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH \
-    cmake .. \
+RUN cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
-      -DCUDA_ENABLED=ON \
+      -DCUDA_ENABLED=OFF \
       -DGUI_ENABLED=OFF \
-      -DTESTS_ENABLED=OFF \
-      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
-      -DCMAKE_CUDA_ARCHITECTURES=all-major \
-      -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs"
+      -DTESTS_ENABLED=OFF
 RUN make -j2
 RUN make install && ldconfig
 WORKDIR /workspace
