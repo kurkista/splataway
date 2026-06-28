@@ -148,6 +148,7 @@ def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
             f" --database_path {db}"
             f" --image_path {imgs}"
             f" --ImageReader.single_camera 1"
+            f" --SiftExtraction.use_gpu 0"
         ),
     ]
 
