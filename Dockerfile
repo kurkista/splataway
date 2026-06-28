@@ -40,7 +40,8 @@ RUN apt-get update && apt-get install -y \
     libboost-graph-dev libboost-system-dev \
     libeigen3-dev libflann-dev libfreeimage-dev libmetis-dev \
     libgoogle-glog-dev libgflags-dev libsqlite3-dev \
-    libglew-dev libcgal-dev libceres-dev && \
+    libglew-dev libcgal-dev libceres-dev \
+    libgmp-dev libmpfr-dev libatlas-base-dev && \
     rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /colmap && \
@@ -49,7 +50,8 @@ RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /col
       -DCMAKE_BUILD_TYPE=Release \
       -DCUDA_ENABLED=ON \
       -DGUI_ENABLED=OFF \
-      -DTESTS_ENABLED=OFF && \
+      -DTESTS_ENABLED=OFF \
+      -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda && \
     make -j2 && make install && ldconfig && \
     rm -rf /colmap
 
