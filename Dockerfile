@@ -43,14 +43,14 @@ RUN apt-get update && apt-get install -y \
     libglew-dev libcgal-dev libceres-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/colmap/colmap.git /colmap && \
+RUN git clone --depth 1 --branch 3.9.1 https://github.com/colmap/colmap.git /colmap && \
     cd /colmap && mkdir build && cd build && \
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCUDA_ENABLED=ON \
       -DGUI_ENABLED=OFF \
       -DTESTS_ENABLED=OFF && \
-    make -j$(nproc) && make install && ldconfig && \
+    make -j2 && make install && ldconfig && \
     rm -rf /colmap
 
 ENV OPENSPLAT=/opensplat/build/opensplat
