@@ -174,7 +174,7 @@ def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
         steps += [
             (f"{env} colmap vocab_tree_builder"
              f" --database_path {db} --vocab_tree_path {vtree}"
-             f" --num_visual_words 1024 --max_num_descriptors 500000"),
+             f" --num_visual_words 1024"),
             (f"{env} colmap vocab_tree_matcher"
              f" --database_path {db}"
              f" --VocabTreeMatching.vocab_tree_path {vtree}"),
