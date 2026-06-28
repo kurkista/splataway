@@ -120,6 +120,75 @@ def run_remote(pod: dict, cmd: str, log_file=None) -> int:
         ssh.close()
 
 
+def install_colmap(pod: dict) -> None:
+    """Install COLMAP on the pod via apt (CPU build, much faster than Apple Silicon)."""
+    print("  Installing COLMAP on pod…")
+    rc = run_remote(pod, "apt-get update -qq && apt-get install -y -qq colmap 2>&1 | tail -3")
+    if rc != 0:
+        raise RuntimeError(f"COLMAP install failed (exit {rc})")
+    print("  COLMAP ready.")
+
+
+def run_colmap_remote(pod: dict, matcher: str, log_file=None) -> None:
+    """
+    Run COLMAP feature extraction, matching, and mapping on the pod.
+    Expects images at /workspace/scene/images/.
+    Produces sparse reconstruction at /workspace/scene/colmap/sparse/0/.
+    """
+    db   = "/workspace/scene/colmap/database.db"
+    imgs = "/workspace/scene/images"
+    sparse = "/workspace/scene/colmap/sparse"
+
+    cmds = [
+        f"mkdir -p {sparse}",
+        (
+            f"colmap feature_extractor"
+            f" --database_path {db}"
+            f" --image_path {imgs}"
+            f" --ImageReader.single_camera 1"
+        ),
+    ]
+
+    if matcher == "vocab_tree":
+        vtree = "/workspace/vocab_tree.bin"
+        cmds += [
+            (
+                f"colmap vocab_tree_builder"
+                f" --database_path {db}"
+                f" --vocab_tree_path {vtree}"
+                f" --num_visual_words 1024"
+                f" --max_num_descriptors 500000"
+            ),
+            (
+                f"colmap vocab_tree_matcher"
+                f" --database_path {db}"
+                f" --VocabTreeMatching.vocab_tree_path {vtree}"
+            ),
+        ]
+    else:
+        cmds.append(
+            f"colmap {matcher}_matcher --database_path {db}"
+        )
+
+    cmds.append(
+        f"colmap mapper"
+        f" --database_path {db}"
+        f" --image_path {imgs}"
+        f" --output_path {sparse}"
+    )
+
+    for cmd in cmds:
+        print(f"  $ {cmd}")
+        rc = run_remote(pod, cmd, log_file=log_file)
+        if rc != 0:
+            raise RuntimeError(f"Remote COLMAP step failed (exit {rc}): {cmd}")
+
+    # Verify reconstruction was produced
+    rc = run_remote(pod, f"test -d {sparse}/0 && echo OK || echo MISSING")
+    if rc != 0:
+        raise RuntimeError("COLMAP produced no reconstruction on pod (sparse/0 missing)")
+
+
 def terminate_pod(pod_id: str) -> None:
     """Terminate and delete the pod."""
     _client()

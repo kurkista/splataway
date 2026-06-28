@@ -104,31 +104,43 @@ def ensure_vocab_tree(db_path: Path, colmap_dir: Path) -> Path:
     return tree_path
 
 
+# Images above this count route COLMAP to the cloud pod when --cloud is set
+CLOUD_COLMAP_THRESHOLD = 300
+
 # ── Cloud training ─────────────────────────────────────────────────────────────
 def _cloud_train(
     colmap_dir: Path,
     images_dir: Path,
     out_ply: Path,
     iters: int,
+    matcher: str,
     gpu: str,
     image: str,
     log_path: Path,
     dry_run: bool,
+    cloud_colmap: bool = False,
 ) -> None:
-    from cloud.pack       import pack_scene
-    from cloud.runpod_api import create_pod, wait_ready, run_remote, terminate_pod
+    from cloud.pack       import pack_scene, pack_images_only
+    from cloud.runpod_api import create_pod, wait_ready, run_remote, terminate_pod, install_colmap, run_colmap_remote
     from cloud.transfer   import upload, download
 
     if dry_run:
-        print(f"  [dry-run] Would pack scene and train on RunPod ({gpu})")
-        print(f"  [dry-run] Remote: opensplat /workspace/scene/colmap -n {iters} --sh-degree 3")
+        if cloud_colmap:
+            print(f"  [dry-run] Large dataset — COLMAP + training both on RunPod ({gpu})")
+            print(f"  [dry-run] Remote: colmap {matcher}_matcher → opensplat -n {iters}")
+        else:
+            print(f"  [dry-run] Would pack scene and train on RunPod ({gpu})")
+            print(f"  [dry-run] Remote: opensplat /workspace/scene/colmap -n {iters} --sh-degree 3")
         return
 
     tmp_dir = SCRIPT_DIR / "projects" / out_ply.parent.name / "cloud_tmp"
     pod_id = None
     try:
         # Pack
-        tar_path = pack_scene(colmap_dir, images_dir, tmp_dir)
+        if cloud_colmap:
+            tar_path = pack_images_only(images_dir, tmp_dir)
+        else:
+            tar_path = pack_scene(colmap_dir, images_dir, tmp_dir)
 
         # Spin up pod
         pod = create_pod(gpu=gpu, image=image, name=f"opensplat-{out_ply.parent.name}")
@@ -136,12 +148,19 @@ def _cloud_train(
         pod = wait_ready(pod_id)
 
         # Upload
-        print("  Uploading scene…")
+        print("  Uploading…")
         remote_tar = upload(pod, tar_path)
 
         # Extract on pod
         print("  Extracting…")
         run_remote(pod, f"tar -xzf {remote_tar} -C /workspace/")
+
+        # COLMAP on pod (large dataset path)
+        if cloud_colmap:
+            install_colmap(pod)
+            print(f"  Running COLMAP ({matcher} matcher) on pod…")
+            with open(log_path, "a") as log:
+                run_colmap_remote(pod, matcher, log_file=log)
 
         # Train
         remote_cmd = (
@@ -261,6 +280,15 @@ def main() -> None:
         for d in [colmap, sparse]:
             d.mkdir(parents=True, exist_ok=True)
 
+    # ── Routing: cloud COLMAP for large image sets ───────────────────────────
+    # Count source images now so we can decide before the summary is printed.
+    if is_images:
+        _src_count = sum(1 for f in input_path.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS)
+    else:
+        _src_count = 0  # video: frame count unknown until extraction, always local COLMAP
+
+    cloud_colmap = bool(args.cloud) and is_images and _src_count > CLOUD_COLMAP_THRESHOLD
+
     # ── Summary ──────────────────────────────────────────────────────────────
     iters_display = cloud_iters if args.cloud else local_iters
     print(f"\n{'━' * 60}")
@@ -269,6 +297,8 @@ def main() -> None:
     print(f"  Output   : {out_ply}")
     print(f"  Matcher  : {matcher}  |  Iterations : {iters_display}")
     if args.cloud:
+        colmap_loc = f"cloud pod ({_src_count} images)" if cloud_colmap else "local"
+        print(f"  COLMAP   : {colmap_loc}")
         print(f"  Training : cloud GPU ({args.cloud}, {cloud_gpu})")
     if args.from_step:
         print(f"  Resuming from: {args.from_step}")
@@ -340,64 +370,70 @@ def main() -> None:
     else:
         print(f"\n  Skipping: frames")
 
-    # ── Step 2: COLMAP feature extraction ────────────────────────────────────
-    if STEPS.index("features") >= skip_before:
-        step_header(2, total, "COLMAP — feature extraction")
-        run([
-            "colmap", "feature_extractor",
-            "--database_path", db,
-            "--image_path",    colmap_images,
-            "--ImageReader.single_camera", single_camera,
-        ], log_path, args.dry_run)
+    # ── Steps 2–4: COLMAP (skipped when cloud_colmap — runs on pod instead) ──
+    if cloud_colmap:
+        print("\n  Steps 2–4 (COLMAP) will run on cloud pod — skipping locally.")
     else:
-        print(f"\n  Skipping: features")
+        # ── Step 2: COLMAP feature extraction ────────────────────────────────
+        if STEPS.index("features") >= skip_before:
+            step_header(2, total, "COLMAP — feature extraction")
+            run([
+                "colmap", "feature_extractor",
+                "--database_path", db,
+                "--image_path",    colmap_images,
+                "--ImageReader.single_camera", single_camera,
+            ], log_path, args.dry_run)
+        else:
+            print(f"\n  Skipping: features")
 
-    # ── Step 3: COLMAP feature matching ──────────────────────────────────────
-    if STEPS.index("matching") >= skip_before:
-        step_header(3, total, f"COLMAP — {matcher} matching")
-        match_cmd = ["colmap", f"{matcher}_matcher", "--database_path", db]
-        if matcher == "vocab_tree":
-            match_cmd += ["--VocabTreeMatching.vocab_tree_path", ensure_vocab_tree(db, colmap)]
-        run(match_cmd, log_path, args.dry_run)
-    else:
-        print(f"\n  Skipping: matching")
+        # ── Step 3: COLMAP feature matching ──────────────────────────────────
+        if STEPS.index("matching") >= skip_before:
+            step_header(3, total, f"COLMAP — {matcher} matching")
+            match_cmd = ["colmap", f"{matcher}_matcher", "--database_path", db]
+            if matcher == "vocab_tree":
+                match_cmd += ["--VocabTreeMatching.vocab_tree_path", ensure_vocab_tree(db, colmap)]
+            run(match_cmd, log_path, args.dry_run)
+        else:
+            print(f"\n  Skipping: matching")
 
-    # ── Step 4: COLMAP SfM mapper ─────────────────────────────────────────────
-    if STEPS.index("mapping") >= skip_before:
-        step_header(4, total, "COLMAP — SfM mapping (camera poses + sparse cloud)")
-        run([
-            "colmap", "mapper",
-            "--database_path", db,
-            "--image_path",    colmap_images,
-            "--output_path",   sparse,
-        ], log_path, args.dry_run)
+        # ── Step 4: COLMAP SfM mapper ─────────────────────────────────────────
+        if STEPS.index("mapping") >= skip_before:
+            step_header(4, total, "COLMAP — SfM mapping (camera poses + sparse cloud)")
+            run([
+                "colmap", "mapper",
+                "--database_path", db,
+                "--image_path",    colmap_images,
+                "--output_path",   sparse,
+            ], log_path, args.dry_run)
 
-        if not args.dry_run:
-            reconstruction = sparse / "0"
-            if not reconstruction.exists():
-                print("\nERROR: COLMAP produced no reconstruction.")
-                print("Possible causes:")
-                print("  • Not enough image overlap (aim for 70–80% between consecutive frames)")
-                print("  • Too few images (minimum ~20 for a meaningful scene)")
-                print("  • Motion blur or blown highlights reducing feature matches")
-                print(f"  • Check {log_path} for COLMAP output")
-                sys.exit(1)
-    else:
-        print(f"\n  Skipping: mapping")
+            if not args.dry_run:
+                reconstruction = sparse / "0"
+                if not reconstruction.exists():
+                    print("\nERROR: COLMAP produced no reconstruction.")
+                    print("Possible causes:")
+                    print("  • Not enough image overlap (aim for 70–80% between consecutive frames)")
+                    print("  • Too few images (minimum ~20 for a meaningful scene)")
+                    print("  • Motion blur or blown highlights reducing feature matches")
+                    print(f"  • Check {log_path} for COLMAP output")
+                    sys.exit(1)
+        else:
+            print(f"\n  Skipping: mapping")
 
     # ── Step 5: 3DGS training ─────────────────────────────────────────────────
     if STEPS.index("train") >= skip_before:
         if args.cloud:
             step_header(5, total, f"OpenSplat — cloud GPU training ({cloud_iters} iters, {cloud_gpu})")
             _cloud_train(
-                colmap_dir  = colmap,
-                images_dir  = colmap / "images",
-                out_ply     = out_ply,
-                iters       = cloud_iters,
-                gpu         = cloud_gpu,
-                image       = cloud_image,
-                log_path    = log_path,
-                dry_run     = args.dry_run,
+                colmap_dir   = colmap,
+                images_dir   = input_path if cloud_colmap else colmap / "images",
+                out_ply      = out_ply,
+                iters        = cloud_iters,
+                matcher      = matcher,
+                gpu          = cloud_gpu,
+                image        = cloud_image,
+                log_path     = log_path,
+                dry_run      = args.dry_run,
+                cloud_colmap = cloud_colmap,
             )
         else:
             step_header(5, total, f"OpenSplat — 3DGS training ({local_iters} iterations, CPU)")
